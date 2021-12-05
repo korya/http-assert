@@ -20,7 +20,7 @@ func main() {
 		Use:   "http-assert <URL>",
 		Short: "Perform HTTP request and assert received HTTP response",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		Run: func(cmd *cobra.Command, args []string) {
 			httpClient := getHttpClient(parseResolves(cmd))
 
 			m, _ := cmd.Flags().GetString("request")
@@ -30,10 +30,12 @@ func main() {
 			}
 			req, err := http.NewRequestWithContext(cmd.Context(), m, args[0], b)
 			if err != nil {
-				die(3, "Cannot create %s request: %s", m, err)
+				die(91, "Cannot create %s request: %s", m, err)
 			}
 
-			return assertRequest(httpClient, req, parseAssertionFlags(cmd)...)
+			if err := assertRequest(httpClient, req, parseAssertionFlags(cmd)...); err != nil {
+				die(93, "Cannot create %s request: %s", m, err)
+			}
 		},
 	}
 	cmd.PersistentFlags().StringArray("resolve", nil,
@@ -44,7 +46,7 @@ func main() {
 		"Sends the specified data in a POST request to the HTTP server")
 	registerAssertionFlags(cmd)
 
-	if err := cmd.Execute(); err != nil {
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		die(103, "%s", err)
 	}
 }
@@ -63,17 +65,18 @@ func parseResolves(cmd *cobra.Command) []resolvePair {
 	rs, _ := cmd.Flags().GetStringArray("resolve")
 	for _, r := range rs {
 		// format: host:port:addr
-		firstColon := strings.Index(r, ":")
-		if firstColon < 0 {
+		i := strings.Index(r, ":")
+		if i < 0 {
 			die(91, "Invalid value for --resolve flag: %q", r)
 		}
 
-		secondColon := strings.Index(r[firstColon+1:], ":")
-		if secondColon < 0 {
+		j := strings.Index(r[i+1:], ":")
+		if j < 0 {
 			die(91, "Invalid value for --resolve flag: %q", r)
 		}
 
-		res = append(res, resolvePair{Host: r[:secondColon], Addr: r[secondColon+1:]})
+		r := resolvePair{Host: r[:i+1+j], Addr: r[i+1+j+1:]}
+		res = append(res, r)
 	}
 
 	return res
