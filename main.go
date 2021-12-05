@@ -15,33 +15,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// - Support curl's --resolve flag
-// - Support curl's -f flag
-// - Send HTTP request
-// - Assert: status, headers and body
-// resolves = []resolvePair{
-// 	{Host: "youriguide.com:123", Addr: "youriguide.com:443"},
-// 	{Host: "youriguide.com:901", Addr: "youriguide.com:80"},
-// }
-
-// mustPass(AssertRequest("https://youriguide.com", AssertStatusOK()))
-// mustPass(AssertRequest("https://youriguide.com:124"))
-// mustPass(AssertRequest("http://youriguide.com"))
-// mustPass(AssertRequest("http://youriguide.com:901"))
-
 func main() {
-	rootCmd := &cobra.Command{
-		Use:   "http-assert",
-		Short: "Perform HTTP requests and assert received responses",
-	}
-	rootCmd.PersistentFlags().StringArray("resolve", nil,
-		"Provide a custom address for a specific host and port pair; e.g. <host:port:addr[,addr]...>")
-
-	cmdCurl := &cobra.Command{
-		Use:   "do <URL>",
-		Short: "Perform an HTTP request",
+	cmd := &cobra.Command{
+		Use:   "http-assert <URL>",
+		Short: "Perform HTTP request and assert received HTTP response",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			httpClient := getHttpClient(parseResolves(cmd))
 
 			m, _ := cmd.Flags().GetString("request")
@@ -54,94 +33,19 @@ func main() {
 				die(3, "Cannot create %s request: %s", m, err)
 			}
 
-			mustPass(assertRequest(httpClient, req, parseAssertionFlags(cmd)...))
+			return assertRequest(httpClient, req, parseAssertionFlags(cmd)...)
 		},
 	}
-	rootCmd.AddCommand(cmdCurl)
-	registerAssertionFlags(cmdCurl)
-	cmdCurl.Flags().StringP("request", "X", "GET",
+	cmd.PersistentFlags().StringArray("resolve", nil,
+		"Provide a custom address for a specific host and port pair; e.g. <host:port:addr[,addr]...>")
+	cmd.Flags().StringP("request", "X", "GET",
 		"Specifies a custom request method to use when communicating with the HTTP server")
-	cmdCurl.Flags().StringP("data", "d", "",
+	cmd.Flags().StringP("data", "d", "",
 		"Sends the specified data in a POST request to the HTTP server")
+	registerAssertionFlags(cmd)
 
-	cmdGet := &cobra.Command{
-		Use:   "GET <URL>",
-		Short: "Perform an HTTP GET request (shortcut for `do -X GET`)",
-		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			httpClient := getHttpClient(parseResolves(cmd))
-
-			req, err := http.NewRequestWithContext(cmd.Context(),
-				http.MethodGet, args[0], http.NoBody)
-			if err != nil {
-				die(3, "Cannot create GET request: %s")
-			}
-
-			mustPass(assertRequest(httpClient, req, parseAssertionFlags(cmd)...))
-		},
-	}
-	rootCmd.AddCommand(cmdGet)
-	registerAssertionFlags(cmdGet)
-
-	cmdPut := &cobra.Command{
-		Use:   "PUT <URL>",
-		Short: "Perform an HTTP PUT request (shortcut for `do -X PUT`)",
-		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			httpClient := getHttpClient(parseResolves(cmd))
-
-			req, err := http.NewRequestWithContext(cmd.Context(),
-				http.MethodPut, args[0], http.NoBody)
-			if err != nil {
-				die(3, "Cannot create GET request: %s")
-			}
-
-			mustPass(assertRequest(httpClient, req, parseAssertionFlags(cmd)...))
-		},
-	}
-	rootCmd.AddCommand(cmdPut)
-	registerAssertionFlags(cmdPut)
-
-	cmdPost := &cobra.Command{
-		Use:   "POST <URL>",
-		Short: "Perform an HTTP POST request (shortcut for `do -X POST`)",
-		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			httpClient := getHttpClient(parseResolves(cmd))
-
-			req, err := http.NewRequestWithContext(cmd.Context(),
-				http.MethodPost, args[0], http.NoBody)
-			if err != nil {
-				die(3, "Cannot create GET request: %s")
-			}
-
-			mustPass(assertRequest(httpClient, req, parseAssertionFlags(cmd)...))
-		},
-	}
-	rootCmd.AddCommand(cmdPost)
-	registerAssertionFlags(cmdPost)
-
-	cmdDelete := &cobra.Command{
-		Use:   "DELETE <URL>",
-		Short: "Perform an HTTP DELETE request (shortcut for `do -X DELETE`)",
-		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			httpClient := getHttpClient(parseResolves(cmd))
-
-			req, err := http.NewRequestWithContext(cmd.Context(),
-				http.MethodDelete, args[0], http.NoBody)
-			if err != nil {
-				die(3, "Cannot create GET request: %s")
-			}
-
-			mustPass(assertRequest(httpClient, req, parseAssertionFlags(cmd)...))
-		},
-	}
-	rootCmd.AddCommand(cmdDelete)
-	registerAssertionFlags(cmdDelete)
-
-	if err := rootCmd.Execute(); err != nil {
-		die(99, "%s", err)
+	if err := cmd.Execute(); err != nil {
+		die(103, "%s", err)
 	}
 }
 
@@ -151,12 +55,6 @@ func die(rc int, format string, args ...interface{}) {
 	}
 	fmt.Fprintf(os.Stderr, "Error: "+format, args...)
 	os.Exit(rc)
-}
-
-func mustPass(err error) {
-	if err != nil {
-		die(101, "%s", err)
-	}
 }
 
 func parseResolves(cmd *cobra.Command) []resolvePair {
@@ -333,7 +231,6 @@ func getHttpClient(resolves []resolvePair) *http.Client {
 			ExpectContinueTimeout: 1 * time.Second,
 			Proxy:                 http.ProxyFromEnvironment,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				fmt.Printf(":: DialContext: network=%q addr=%q\n", network, addr)
 				for _, r := range resolves {
 					if r.Matches(addr) {
 						addr = r.Addr
