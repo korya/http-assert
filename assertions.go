@@ -82,6 +82,36 @@ func AssertHeaderMatch(name, expPattern string) Assertion {
 	}
 }
 
+func AssertBodyEqual(expContent string) Assertion {
+	return func(res *httpResponse) error {
+		if len(res.BodyBytes) == 0 {
+			return fmt.Errorf("body: expected %q, missing", expContent)
+		}
+
+		if c := string(res.BodyBytes); expContent != c {
+			return fmt.Errorf("body: expected %q, got %q", expContent, c)
+		}
+
+		return nil
+	}
+}
+
+func AssertBodyMatch(expPattern string) Assertion {
+	re := regexp.MustCompile(expPattern)
+
+	return func(res *httpResponse) error {
+		if len(res.BodyBytes) == 0 {
+			return fmt.Errorf("body: expected to match %q, missing", expPattern)
+		}
+
+		if c := string(res.BodyBytes); !re.MatchString(c) {
+			return fmt.Errorf("body: expected to match %q, got %q", expPattern, c)
+		}
+
+		return nil
+	}
+}
+
 func AssertRedirectEqual(expLocation string) Assertion {
 	return func(res *httpResponse) error {
 		if s := res.StatusCode; s < 300 || s >= 400 {
@@ -120,30 +150,6 @@ func AssertRedirectMatch(expPattern string) Assertion {
 		if !re.MatchString(l) {
 			return fmt.Errorf("redirect: wrong Location: expected to match %q, got %q",
 				expPattern, l)
-		}
-
-		return nil
-	}
-}
-
-func AssertBodyEqual(expContent string) Assertion {
-	return func(res *httpResponse) error {
-		if c := string(res.BodyBytes); expContent != c {
-			return fmt.Errorf("body: expected %q, got %q",
-				expContent, c)
-		}
-
-		return nil
-	}
-}
-
-func AssertBodyMatch(expPattern string) Assertion {
-	re := regexp.MustCompile(expPattern)
-
-	return func(res *httpResponse) error {
-		if c := string(res.BodyBytes); !re.MatchString(c) {
-			return fmt.Errorf("body: expected to match %q, got %q",
-				expPattern, c)
 		}
 
 		return nil

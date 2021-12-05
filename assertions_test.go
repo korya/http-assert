@@ -162,10 +162,10 @@ func Test_AssertHeader(t *testing.T) {
 			CaseName: "Matching value",
 			Header: map[string][]string{
 				"one":    []string{"value"},
-				"Target": []string{"val"},
+				"Target": []string{"vAl"},
 				"two":    []string{"value", "v", "2"},
 			},
-			ExpEqualError: `header[taRgET]: expected "value", got "val"`,
+			ExpEqualError: `header[taRgET]: expected "value", got "vAl"`,
 		},
 		{
 			CaseName: "Exact value",
@@ -194,6 +194,62 @@ func Test_AssertHeader(t *testing.T) {
 				`header[taRgEt]: expected to be present, missing`,
 			), tc.CaseName)
 		}
+
+		if tc.ExpEqualError == "" {
+			g.Expect(equal(res)).To(gomega.BeNil(), tc.CaseName)
+		} else {
+			g.Expect(equal(res)).To(gomega.MatchError(tc.ExpEqualError), tc.CaseName)
+		}
+
+		if tc.ExpMatchError == "" {
+			g.Expect(match(res)).To(gomega.BeNil(), tc.CaseName)
+		} else {
+			g.Expect(match(res)).To(gomega.MatchError(tc.ExpMatchError), tc.CaseName)
+		}
+	}
+}
+
+func Test_AssertBody(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	testCases := []struct {
+		CaseName      string
+		Body          []byte
+		ExpEqualError string
+		ExpMatchError string
+	}{
+		{
+			CaseName:      "Null body",
+			ExpEqualError: `body: expected "value", missing`,
+			ExpMatchError: `body: expected to match "(?i)^val.*$", missing`,
+		},
+		{
+			CaseName:      "Empty body",
+			Body:          []byte{},
+			ExpEqualError: `body: expected "value", missing`,
+			ExpMatchError: `body: expected to match "(?i)^val.*$", missing`,
+		},
+		{
+			CaseName:      "Non-matching body",
+			Body:          []byte("v"),
+			ExpEqualError: `body: expected "value", got "v"`,
+			ExpMatchError: `body: expected to match "(?i)^val.*$", got "v"`,
+		},
+		{
+			CaseName:      "Matching body",
+			Body:          []byte("vAl"),
+			ExpEqualError: `body: expected "value", got "vAl"`,
+		},
+		{
+			CaseName: "Exact body",
+			Body:     []byte("value"),
+		},
+	}
+
+	equal := AssertBodyEqual("value")
+	match := AssertBodyMatch("(?i)^val.*$")
+	for _, tc := range testCases {
+		res := &httpResponse{BodyBytes: tc.Body}
 
 		if tc.ExpEqualError == "" {
 			g.Expect(equal(res)).To(gomega.BeNil(), tc.CaseName)
