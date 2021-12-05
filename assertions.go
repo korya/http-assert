@@ -20,7 +20,7 @@ func AssertStatusOK() Assertion {
 
 func AssertStatusNOK() Assertion {
 	return func(res *httpResponse) error {
-		if s := res.StatusCode; s > 200 && s < 300 {
+		if s := res.StatusCode; s >= 200 && s < 300 {
 			return fmt.Errorf("nok: expected NOK, got=%d (%q)",
 				res.StatusCode, res.Status)
 		}
@@ -43,8 +43,7 @@ func AssertStatus(expStatus int) Assertion {
 func AssertHeaderPresent(name string) Assertion {
 	return func(res *httpResponse) error {
 		if v := res.Header.Get(name); v == "" {
-			return fmt.Errorf("header[%s]: expected to be present, missing",
-				name)
+			return fmt.Errorf("header[%s]: expected to be present, missing", name)
 		}
 
 		return nil
@@ -54,8 +53,7 @@ func AssertHeaderPresent(name string) Assertion {
 func AssertHeaderEqual(name, expValue string) Assertion {
 	return func(res *httpResponse) error {
 		if v := res.Header.Get(name); v != expValue {
-			return fmt.Errorf("header[%s]: expected %q, got=%q",
-				name, expValue, v)
+			return fmt.Errorf("header[%s]: expected %q, got=%q", name, expValue, v)
 		}
 
 		return nil
