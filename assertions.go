@@ -10,7 +10,7 @@ type Assertion func(res *httpResponse) error
 func AssertStatusOK() Assertion {
 	return func(res *httpResponse) error {
 		if s := res.StatusCode; s < 200 || s >= 300 {
-			return fmt.Errorf("ok: expected OK, got=%d (%q)",
+			return fmt.Errorf("ok: expected OK, got %d (%q)",
 				res.StatusCode, res.Status)
 		}
 
@@ -21,7 +21,7 @@ func AssertStatusOK() Assertion {
 func AssertStatusNOK() Assertion {
 	return func(res *httpResponse) error {
 		if s := res.StatusCode; s >= 200 && s < 300 {
-			return fmt.Errorf("nok: expected NOK, got=%d (%q)",
+			return fmt.Errorf("nok: expected NOK, got %d (%q)",
 				res.StatusCode, res.Status)
 		}
 
@@ -32,7 +32,7 @@ func AssertStatusNOK() Assertion {
 func AssertStatus(expStatus int) Assertion {
 	return func(res *httpResponse) error {
 		if res.StatusCode != expStatus {
-			return fmt.Errorf("status: expected %d, got=%d (%q)",
+			return fmt.Errorf("status: expected %d, got %d (%q)",
 				expStatus, res.StatusCode, res.Status)
 		}
 
@@ -42,7 +42,7 @@ func AssertStatus(expStatus int) Assertion {
 
 func AssertHeaderPresent(name string) Assertion {
 	return func(res *httpResponse) error {
-		if v := res.Header.Get(name); v == "" {
+		if res.Header.Values(name) == nil {
 			return fmt.Errorf("header[%s]: expected to be present, missing", name)
 		}
 
@@ -52,8 +52,12 @@ func AssertHeaderPresent(name string) Assertion {
 
 func AssertHeaderEqual(name, expValue string) Assertion {
 	return func(res *httpResponse) error {
+		if res.Header.Values(name) == nil {
+			return fmt.Errorf("header[%s]: expected %q, missing", name, expValue)
+		}
+
 		if v := res.Header.Get(name); v != expValue {
-			return fmt.Errorf("header[%s]: expected %q, got=%q", name, expValue, v)
+			return fmt.Errorf("header[%s]: expected %q, got %q", name, expValue, v)
 		}
 
 		return nil
@@ -64,8 +68,13 @@ func AssertHeaderMatch(name, expPattern string) Assertion {
 	re := regexp.MustCompile(expPattern)
 
 	return func(res *httpResponse) error {
+		if res.Header.Values(name) == nil {
+			return fmt.Errorf("header[%s]: expected to match %q, missing",
+				name, expPattern)
+		}
+
 		if v := res.Header.Get(name); !re.MatchString(v) {
-			return fmt.Errorf("header[%s]: expected to match %q, got=%q",
+			return fmt.Errorf("header[%s]: expected to match %q, got %q",
 				name, expPattern, v)
 		}
 
@@ -76,7 +85,7 @@ func AssertHeaderMatch(name, expPattern string) Assertion {
 func AssertRedirectEqual(expLocation string) Assertion {
 	return func(res *httpResponse) error {
 		if s := res.StatusCode; s < 300 || s >= 400 {
-			return fmt.Errorf("redirect: wrong HTTP status: got=%d (%q)",
+			return fmt.Errorf("redirect: wrong HTTP status: got %d (%q)",
 				res.StatusCode, res.Status)
 		}
 
@@ -99,7 +108,7 @@ func AssertRedirectMatch(expPattern string) Assertion {
 
 	return func(res *httpResponse) error {
 		if s := res.StatusCode; s < 300 || s >= 400 {
-			return fmt.Errorf("redirect: wrong HTTP status: got=%d (%q)",
+			return fmt.Errorf("redirect: wrong HTTP status: got %d (%q)",
 				res.StatusCode, res.Status)
 		}
 
