@@ -124,12 +124,11 @@ func AssertRedirectEqual(expLocation string) Assertion {
 				res.StatusCode, res.Status)
 		}
 
-		l := res.Header.Get("Location")
-		if l == "" {
+		if vs := res.Header.Values("Location"); vs == nil {
 			return fmt.Errorf("redirect: no Location header")
 		}
 
-		if l != expLocation {
+		if l := res.Header.Get("Location"); l != expLocation {
 			return fmt.Errorf("redirect: wrong Location: expected %q, got %q",
 				expLocation, l)
 		}
@@ -147,12 +146,11 @@ func AssertRedirectMatch(expPattern string) Assertion {
 				res.StatusCode, res.Status)
 		}
 
-		l := res.Header.Get("Location")
-		if l == "" {
+		if vs := res.Header.Values("Location"); vs == nil {
 			return fmt.Errorf("redirect: no Location header")
 		}
 
-		if !re.MatchString(l) {
+		if l := res.Header.Get("Location"); !re.MatchString(l) {
 			return fmt.Errorf("redirect: wrong Location: expected to match %q, got %q",
 				expPattern, l)
 		}

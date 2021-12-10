@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/onsi/gomega"
@@ -11,6 +12,8 @@ import (
 
 func Test_AssertStatusOK(t *testing.T) {
 	g := gomega.NewWithT(t)
+
+	t.Parallel()
 
 	testCases := []struct {
 		StatusCode int
@@ -59,6 +62,8 @@ func Test_AssertStatusOK(t *testing.T) {
 
 func Test_AssertStatusEqual(t *testing.T) {
 	g := gomega.NewWithT(t)
+
+	t.Parallel()
 
 	testCases := []struct {
 		StatusCode int
@@ -114,6 +119,8 @@ func Test_AssertStatusEqual(t *testing.T) {
 
 func Test_AssertHeader(t *testing.T) {
 	g := gomega.NewWithT(t)
+
+	t.Parallel()
 
 	testCases := []struct {
 		CaseName      string
@@ -207,7 +214,7 @@ func Test_AssertHeader(t *testing.T) {
 
 	present := AssertHeaderPresent("taRgEt")
 	equal := AssertHeaderEqual("taRgET", "value")
-	match := AssertHeaderMatch("taRget", "(?i)^val.*$")
+	match := AssertHeaderMatch("taRget", `(?i)^val.*$`)
 	for _, tc := range testCases {
 		res := &httpResponse{
 			Response: &http.Response{
@@ -239,6 +246,8 @@ func Test_AssertHeader(t *testing.T) {
 
 func Test_AssertBody(t *testing.T) {
 	g := gomega.NewWithT(t)
+
+	t.Parallel()
 
 	testCases := []struct {
 		CaseName      string
@@ -275,9 +284,187 @@ func Test_AssertBody(t *testing.T) {
 	}
 
 	equal := AssertBodyEqual("value")
-	match := AssertBodyMatch("(?i)^val.*$")
+	match := AssertBodyMatch(`(?i)^val.*$`)
 	for _, tc := range testCases {
 		res := &httpResponse{BodyBytes: tc.Body}
+
+		if tc.ExpEqualError == "" {
+			g.Expect(equal(res)).To(gomega.BeNil(), tc.CaseName)
+		} else {
+			g.Expect(equal(res)).To(gomega.MatchError(tc.ExpEqualError), tc.CaseName)
+		}
+
+		if tc.ExpMatchError == "" {
+			g.Expect(match(res)).To(gomega.BeNil(), tc.CaseName)
+		} else {
+			g.Expect(match(res)).To(gomega.MatchError(tc.ExpMatchError), tc.CaseName)
+		}
+	}
+}
+
+func Test_AssertRedirect(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	t.Parallel()
+
+	testCases := []struct {
+		CaseName      string
+		StatusCode    int
+		Header        map[string][]string
+		ExpEqualError string
+		ExpMatchError string
+	}{
+		{
+			CaseName:      "No status, no headers",
+			ExpEqualError: `redirect: wrong HTTP status: got 0 ("0")`,
+			ExpMatchError: `redirect: wrong HTTP status: got 0 ("0")`,
+		},
+		{
+			CaseName:      "OK status, no headers",
+			StatusCode:    200,
+			ExpEqualError: `redirect: wrong HTTP status: got 200 ("2_0_0")`,
+			ExpMatchError: `redirect: wrong HTTP status: got 200 ("2_0_0")`,
+		},
+		{
+			CaseName:      "Error status, no headers",
+			StatusCode:    400,
+			ExpEqualError: `redirect: wrong HTTP status: got 400 ("4_0_0")`,
+			ExpMatchError: `redirect: wrong HTTP status: got 400 ("4_0_0")`,
+		},
+		{
+			CaseName:      "3xx, no headers",
+			StatusCode:    300,
+			ExpEqualError: `redirect: no Location header`,
+			ExpMatchError: `redirect: no Location header`,
+		},
+		{
+			CaseName:   "3xx, Location missing",
+			StatusCode: 301,
+			Header: map[string][]string{
+				"one": []string{"example.com/"},
+				"two": []string{"https://example.com/", "v", "2"},
+			},
+			ExpEqualError: `redirect: no Location header`,
+			ExpMatchError: `redirect: no Location header`,
+		},
+		{
+			CaseName:   "3xx, Location empty",
+			StatusCode: 302,
+			Header: map[string][]string{
+				"one":      []string{"example.com/"},
+				"Location": []string{""},
+				"two":      []string{"https://example.com/", "v", "2"},
+			},
+			ExpEqualError: `redirect: wrong Location: expected "https://example.com/", got ""`,
+			ExpMatchError: `redirect: wrong Location: expected to match "(?i)example\\.[a-z]*/$", got ""`,
+		},
+		{
+			CaseName:   "3xx, Location mismatch",
+			StatusCode: 303,
+			Header: map[string][]string{
+				"one":      []string{"example.com/"},
+				"Location": []string{"exa"},
+				"two":      []string{"https://example.com/", "v", "2"},
+			},
+			ExpEqualError: `redirect: wrong Location: expected "https://example.com/", got "exa"`,
+			ExpMatchError: `redirect: wrong Location: expected to match "(?i)example\\.[a-z]*/$", got "exa"`,
+		},
+
+		{
+			CaseName:   "3xx, Location match",
+			StatusCode: 304,
+			Header: map[string][]string{
+				"one":      []string{"example.com/"},
+				"Location": []string{"eXaMpLe.Com/"},
+				"two":      []string{"https://example.com/", "v", "2"},
+			},
+			ExpEqualError: `redirect: wrong Location: expected "https://example.com/", got "eXaMpLe.Com/"`,
+		},
+		{
+			CaseName:   "3xx, Location equal",
+			StatusCode: 305,
+			Header: map[string][]string{
+				"one":      []string{"example.com/"},
+				"Location": []string{"https://example.com/"},
+				"two":      []string{"example.com/", "v", "2"},
+			},
+		},
+		{
+			CaseName:   "Wrong status, Location equal",
+			StatusCode: 204,
+			Header: map[string][]string{
+				"one":      []string{"example.com/"},
+				"Location": []string{"https://example.com/"},
+				"two":      []string{"example.com/", "v", "2"},
+			},
+			ExpEqualError: `redirect: wrong HTTP status: got 204 ("2_0_4")`,
+			ExpMatchError: `redirect: wrong HTTP status: got 204 ("2_0_4")`,
+		},
+		// Multiple values
+		{
+			CaseName:   "Multiple: 3xx, Location mismatch",
+			StatusCode: 306,
+			Header: map[string][]string{
+				"one":      []string{"example.com/"},
+				"Location": []string{"one", "two", "three"},
+				"two":      []string{"https://example.com/", "v", "2"},
+			},
+			ExpEqualError: `redirect: wrong Location: expected "https://example.com/", got "one"`,
+			ExpMatchError: `redirect: wrong Location: expected to match "(?i)example\\.[a-z]*/$", got "one"`,
+		},
+		{
+			CaseName:   "Multiple: 3xx, Location first match",
+			StatusCode: 307,
+			Header: map[string][]string{
+				"one":      []string{"example.com/"},
+				"Location": []string{"eXaMpLe.Com/", "two", "vAl", "three"},
+				"two":      []string{"https://example.com/", "v", "2"},
+			},
+			ExpEqualError: `redirect: wrong Location: expected "https://example.com/", got "eXaMpLe.Com/"`,
+		},
+		{
+			CaseName:   "Multiple: 3xx, Location second match",
+			StatusCode: 307,
+			Header: map[string][]string{
+				"one":      []string{"example.com/"},
+				"Location": []string{"one", "eXaMpLe.Com/", "vAl", "three"},
+				"two":      []string{"https://example.com/", "v", "2"},
+			},
+			ExpEqualError: `redirect: wrong Location: expected "https://example.com/", got "one"`,
+			ExpMatchError: `redirect: wrong Location: expected to match "(?i)example\\.[a-z]*/$", got "one"`,
+		},
+		{
+			CaseName:   "Multiple: 3xx, Location first equal",
+			StatusCode: 308,
+			Header: map[string][]string{
+				"one":      []string{"example.com/"},
+				"Location": []string{"https://example.com/", "vAl", "two", "example.com/"},
+				"two":      []string{"https://example.com/", "v", "2"},
+			},
+		},
+		{
+			CaseName:   "Multiple: 3xx, Location second equal",
+			StatusCode: 308,
+			Header: map[string][]string{
+				"one":      []string{"example.com/"},
+				"Location": []string{"one", "https://example.com/", "two", "example.com/"},
+				"two":      []string{"https://example.com/", "v", "2"},
+			},
+			ExpEqualError: `redirect: wrong Location: expected "https://example.com/", got "one"`,
+			ExpMatchError: `redirect: wrong Location: expected to match "(?i)example\\.[a-z]*/$", got "one"`,
+		},
+	}
+
+	equal := AssertRedirectEqual(`https://example.com/`)
+	match := AssertRedirectMatch(`(?i)example\.[a-z]*/$`)
+	for _, tc := range testCases {
+		res := &httpResponse{
+			Response: &http.Response{
+				StatusCode: tc.StatusCode,
+				Status:     strings.Join(strings.Split(strconv.Itoa(tc.StatusCode), ""), "_"),
+				Header:     http.Header(tc.Header),
+			},
+		}
 
 		if tc.ExpEqualError == "" {
 			g.Expect(equal(res)).To(gomega.BeNil(), tc.CaseName)
