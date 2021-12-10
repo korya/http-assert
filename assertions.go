@@ -52,15 +52,18 @@ func AssertHeaderPresent(name string) Assertion {
 
 func AssertHeaderEqual(name, expValue string) Assertion {
 	return func(res *httpResponse) error {
-		if res.Header.Values(name) == nil {
+		vs := res.Header.Values(name)
+		if vs == nil {
 			return fmt.Errorf("header[%s]: expected %q, missing", name, expValue)
 		}
 
-		if v := res.Header.Get(name); v != expValue {
-			return fmt.Errorf("header[%s]: expected %q, got %q", name, expValue, v)
+		for _, v := range vs {
+			if v == expValue {
+				return nil
+			}
 		}
 
-		return nil
+		return fmt.Errorf("header[%s]: expected %q, got %q", name, expValue, vs)
 	}
 }
 
@@ -68,17 +71,19 @@ func AssertHeaderMatch(name, expPattern string) Assertion {
 	re := regexp.MustCompile(expPattern)
 
 	return func(res *httpResponse) error {
-		if res.Header.Values(name) == nil {
+		vs := res.Header.Values(name)
+		if vs == nil {
 			return fmt.Errorf("header[%s]: expected to match %q, missing",
 				name, expPattern)
 		}
 
-		if v := res.Header.Get(name); !re.MatchString(v) {
-			return fmt.Errorf("header[%s]: expected to match %q, got %q",
-				name, expPattern, v)
+		for _, v := range vs {
+			if re.MatchString(v) {
+				return nil
+			}
 		}
 
-		return nil
+		return fmt.Errorf("header[%s]: expected to match %q, got %q", name, expPattern, vs)
 	}
 }
 

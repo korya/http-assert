@@ -145,8 +145,8 @@ func Test_AssertHeader(t *testing.T) {
 				"Target": []string{""},
 				"two":    []string{"value", "v", "2"},
 			},
-			ExpEqualError: `header[taRgET]: expected "value", got ""`,
-			ExpMatchError: `header[taRget]: expected to match "(?i)^val.*$", got ""`,
+			ExpEqualError: `header[taRgET]: expected "value", got [""]`,
+			ExpMatchError: `header[taRget]: expected to match "(?i)^val.*$", got [""]`,
 		},
 		{
 			CaseName: "Non-empty but non-matching value",
@@ -155,8 +155,8 @@ func Test_AssertHeader(t *testing.T) {
 				"Target": []string{"v"},
 				"two":    []string{"value", "v", "2"},
 			},
-			ExpEqualError: `header[taRgET]: expected "value", got "v"`,
-			ExpMatchError: `header[taRget]: expected to match "(?i)^val.*$", got "v"`,
+			ExpEqualError: `header[taRgET]: expected "value", got ["v"]`,
+			ExpMatchError: `header[taRget]: expected to match "(?i)^val.*$", got ["v"]`,
 		},
 		{
 			CaseName: "Matching value",
@@ -165,13 +165,41 @@ func Test_AssertHeader(t *testing.T) {
 				"Target": []string{"vAl"},
 				"two":    []string{"value", "v", "2"},
 			},
-			ExpEqualError: `header[taRgET]: expected "value", got "vAl"`,
+			ExpEqualError: `header[taRgET]: expected "value", got ["vAl"]`,
 		},
 		{
 			CaseName: "Exact value",
 			Header: map[string][]string{
 				"one":    []string{"value"},
 				"Target": []string{"value"},
+				"two":    []string{"value", "v", "2"},
+			},
+		},
+		// Multiple values
+		{
+			CaseName: "Multiple: no matching value",
+			Header: map[string][]string{
+				"one":    []string{"value"},
+				"Target": []string{"one", "two", "three"},
+				"two":    []string{"value", "v", "2"},
+			},
+			ExpEqualError: `header[taRgET]: expected "value", got ["one" "two" "three"]`,
+			ExpMatchError: `header[taRget]: expected to match "(?i)^val.*$", got ["one" "two" "three"]`,
+		},
+		{
+			CaseName: "Multple: Matching value",
+			Header: map[string][]string{
+				"one":    []string{"value"},
+				"Target": []string{"one", "two", "vAl", "three"},
+				"two":    []string{"value", "v", "2"},
+			},
+			ExpEqualError: `header[taRgET]: expected "value", got ["one" "two" "vAl" "three"]`,
+		},
+		{
+			CaseName: "Multple: Exact value",
+			Header: map[string][]string{
+				"one":    []string{"value"},
+				"Target": []string{"one", "vAl", "two", "value"},
 				"two":    []string{"value", "v", "2"},
 			},
 		},
