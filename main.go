@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 func main() {
@@ -22,7 +23,10 @@ func main() {
 		Short: "Perform HTTP request and assert received HTTP response",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			httpClient := getHttpClient(mustParseHostMappings(cmd.Flags().GetStringArray("maphost")))
+			c := Client{
+				Verbose:      viper.GetBool("verbose"),
+				HostMappings: mustParseHostMappings(viper.GetStringSlice("maphost")),
+			}
 
 			m, _ := cmd.Flags().GetString("request")
 			b := io.Reader(http.NoBody)
@@ -34,7 +38,7 @@ func main() {
 				die(91, "Cannot create %s request: %s", m, err)
 			}
 
-			if err := assertRequest(httpClient, req, parseAssertionFlags(cmd)...); err != nil {
+			if err := c.Do(req, parseAssertionFlags(cmd)...); err != nil {
 				die(93, "Cannot create %s request: %s", m, err)
 			}
 		},
@@ -45,11 +49,17 @@ func main() {
 	cmd.PersistentFlags().StringArray("maphost", nil,
 		"Provide a custom address for a specific host and port pair; "+
 			"e.g. <srchostname:srcport=dsthostname[:dstport]...>")
+	cmd.PersistentFlags().BoolP("verbose", "v", false, "Be verbose")
 	cmd.Flags().StringP("request", "X", "GET",
 		"Specifies a custom request method to use when communicating with the HTTP server")
 	cmd.Flags().StringP("data", "d", "",
 		"Sends the specified data in a POST request to the HTTP server")
 	registerAssertionFlags(cmd)
+
+	viper.BindPFlag("verbose", cmd.PersistentFlags().Lookup("verbose"))
+	viper.BindPFlag("maphost", cmd.PersistentFlags().Lookup("maphost"))
+	viper.SetEnvPrefix("HTTP_ASSERT")
+	viper.AutomaticEnv()
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		die(103, "%s", err)
@@ -176,16 +186,35 @@ func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 	return res
 }
 
-func assertRequest(httpClient *http.Client, req *http.Request, assertions ...Assertion) error {
+type Client struct {
+	Verbose      bool
+	HostMappings []hostMapping
+}
+
+func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 	if len(assertions) == 0 {
 		return fmt.Errorf("no assertions defined")
 	}
 
-	res, err := httpClient.Do(req)
+	if c.Verbose {
+		c.log("Performing: '%s %s'", req.Method, req.URL)
+		if len(c.HostMappings) > 0 {
+			c.log("HostMappings %d:\n", len(c.HostMappings))
+			for i := range c.HostMappings {
+				c.log("- %q -> %q\n", c.HostMappings[i].Src, c.HostMappings[i].Dst)
+			}
+		}
+	}
+
+	res, err := c.getHttpClient().Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer res.Body.Close()
+
+	if c.Verbose {
+		c.log("Get: %d (%s)\n", res.StatusCode, res.Status)
+	}
 
 	httpRes := &httpResponse{Response: res}
 	httpRes.BodyBytes, _ = io.ReadAll(res.Body)
@@ -203,7 +232,7 @@ func assertRequest(httpClient *http.Client, req *http.Request, assertions ...Ass
 			fmt.Fprintf(&b, "- %s\n", assertErrors[i])
 		}
 		b.WriteString("\n\n")
-		httpRes.writeTo(&b, true)
+		httpRes.writeTo(&b, c.Verbose)
 		b.WriteString("\n")
 		return errors.New(b.String())
 	}
@@ -211,24 +240,14 @@ func assertRequest(httpClient *http.Client, req *http.Request, assertions ...Ass
 	return nil
 }
 
-type httpResponse struct {
-	*http.Response
-	BodyBytes []byte
-}
-
-func (r httpResponse) writeTo(w io.Writer, withBody bool) {
-	// Ensure to close previous body
-	b := r.Response.Body
-	defer b.Close()
-	if withBody {
-		r.Response.Body = io.NopCloser(bytes.NewReader(r.BodyBytes))
-	} else {
-		r.Response.Body = io.NopCloser(strings.NewReader("<<Payload is omitted>>"))
+func (c Client) log(format string, args ...interface{}) {
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
 	}
-	r.Response.Write(w)
+	fmt.Fprintf(os.Stderr, format, args...)
 }
 
-func getHttpClient(hostMappings []hostMapping) *http.Client {
+func (c Client) getHttpClient() *http.Client {
 	dialer := &net.Dialer{
 		Timeout:   10 * time.Second,
 		KeepAlive: 20 * time.Second,
@@ -248,16 +267,37 @@ func getHttpClient(hostMappings []hostMapping) *http.Client {
 			ExpectContinueTimeout: 1 * time.Second,
 			Proxy:                 http.ProxyFromEnvironment,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				for _, r := range hostMappings {
-					if r.Matches(addr) {
-						addr = r.DstHost()
-						break
-					}
-				}
-				return dialer.DialContext(ctx, network, addr)
+				return dialer.DialContext(ctx, network, c.getDstHost(addr))
 			},
 		},
 	}
+}
+
+func (c Client) getDstHost(addr string) string {
+	for _, r := range c.HostMappings {
+		if r.Matches(addr) {
+			return r.DstHost()
+		}
+	}
+
+	return addr
+}
+
+type httpResponse struct {
+	*http.Response
+	BodyBytes []byte
+}
+
+func (r httpResponse) writeTo(w io.Writer, withBody bool) {
+	// Ensure to close previous body
+	b := r.Response.Body
+	defer b.Close()
+	if withBody {
+		r.Response.Body = io.NopCloser(bytes.NewReader(r.BodyBytes))
+	} else {
+		r.Response.Body = io.NopCloser(strings.NewReader("<<Payload is omitted>>"))
+	}
+	r.Response.Write(w)
 }
 
 type hostMapping struct {
