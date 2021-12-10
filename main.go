@@ -56,8 +56,8 @@ func main() {
 		"Sends the specified data in a POST request to the HTTP server")
 	registerAssertionFlags(cmd)
 
-	viper.BindPFlag("verbose", cmd.PersistentFlags().Lookup("verbose"))
-	viper.BindPFlag("maphost", cmd.PersistentFlags().Lookup("maphost"))
+	_ = viper.BindPFlag("verbose", cmd.PersistentFlags().Lookup("verbose"))
+	_ = viper.BindPFlag("maphost", cmd.PersistentFlags().Lookup("maphost"))
 	viper.SetEnvPrefix("HTTP_ASSERT")
 	viper.AutomaticEnv()
 
@@ -113,7 +113,7 @@ func parseHostMappings(vals []string) ([]hostMapping, error) {
 func registerAssertionFlags(cmd *cobra.Command) {
 	cmd.Flags().Int("assert-status", 0, "Assert response status equals the provided value")
 	cmd.Flags().StringArray("assert-header", nil, "Assert header equals the provided regexp")
-	cmd.Flags().StringP("assert-body", "B", "", "Assert body equals the provided value")
+	cmd.Flags().String("assert-body", "", "Assert body equals the provided value")
 
 	// Common shorthands
 	cmd.Flags().Bool("assert-ok", false, "Assert response is successful (2xx)")
@@ -297,7 +297,7 @@ func (r httpResponse) writeTo(w io.Writer, withBody bool) {
 	} else {
 		r.Response.Body = io.NopCloser(strings.NewReader("<<Payload is omitted>>"))
 	}
-	r.Response.Write(w)
+	_ = r.Response.Write(w)
 }
 
 type hostMapping struct {
