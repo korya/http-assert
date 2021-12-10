@@ -29,7 +29,7 @@ func AssertStatusNOK() Assertion {
 	}
 }
 
-func AssertStatus(expStatus int) Assertion {
+func AssertStatusEqual(expStatus int) Assertion {
 	return func(res *httpResponse) error {
 		if res.StatusCode != expStatus {
 			return fmt.Errorf("status: expected %d, got %d (%q)",
@@ -52,15 +52,18 @@ func AssertHeaderPresent(name string) Assertion {
 
 func AssertHeaderEqual(name, expValue string) Assertion {
 	return func(res *httpResponse) error {
-		if res.Header.Values(name) == nil {
+		vs := res.Header.Values(name)
+		if vs == nil {
 			return fmt.Errorf("header[%s]: expected %q, missing", name, expValue)
 		}
 
-		if v := res.Header.Get(name); v != expValue {
-			return fmt.Errorf("header[%s]: expected %q, got %q", name, expValue, v)
+		for _, v := range vs {
+			if v == expValue {
+				return nil
+			}
 		}
 
-		return nil
+		return fmt.Errorf("header[%s]: expected %q, got %q", name, expValue, vs)
 	}
 }
 
@@ -68,17 +71,19 @@ func AssertHeaderMatch(name, expPattern string) Assertion {
 	re := regexp.MustCompile(expPattern)
 
 	return func(res *httpResponse) error {
-		if res.Header.Values(name) == nil {
+		vs := res.Header.Values(name)
+		if vs == nil {
 			return fmt.Errorf("header[%s]: expected to match %q, missing",
 				name, expPattern)
 		}
 
-		if v := res.Header.Get(name); !re.MatchString(v) {
-			return fmt.Errorf("header[%s]: expected to match %q, got %q",
-				name, expPattern, v)
+		for _, v := range vs {
+			if re.MatchString(v) {
+				return nil
+			}
 		}
 
-		return nil
+		return fmt.Errorf("header[%s]: expected to match %q, got %q", name, expPattern, vs)
 	}
 }
 
@@ -119,12 +124,11 @@ func AssertRedirectEqual(expLocation string) Assertion {
 				res.StatusCode, res.Status)
 		}
 
-		l := res.Header.Get("Location")
-		if l == "" {
+		if vs := res.Header.Values("Location"); vs == nil {
 			return fmt.Errorf("redirect: no Location header")
 		}
 
-		if l != expLocation {
+		if l := res.Header.Get("Location"); l != expLocation {
 			return fmt.Errorf("redirect: wrong Location: expected %q, got %q",
 				expLocation, l)
 		}
@@ -142,12 +146,11 @@ func AssertRedirectMatch(expPattern string) Assertion {
 				res.StatusCode, res.Status)
 		}
 
-		l := res.Header.Get("Location")
-		if l == "" {
+		if vs := res.Header.Values("Location"); vs == nil {
 			return fmt.Errorf("redirect: no Location header")
 		}
 
-		if !re.MatchString(l) {
+		if l := res.Header.Get("Location"); !re.MatchString(l) {
 			return fmt.Errorf("redirect: wrong Location: expected to match %q, got %q",
 				expPattern, l)
 		}
