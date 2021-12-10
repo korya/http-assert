@@ -21,7 +21,7 @@ func main() {
 		Short: "Perform HTTP request and assert received HTTP response",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			httpClient := getHttpClient(parseResolves(cmd))
+			httpClient := getHttpClient(parseHostMappings(cmd))
 
 			m, _ := cmd.Flags().GetString("request")
 			b := io.Reader(http.NoBody)
@@ -38,8 +38,9 @@ func main() {
 			}
 		},
 	}
-	cmd.PersistentFlags().StringArray("resolve", nil,
-		"Provide a custom address for a specific host and port pair; e.g. <host:port:addr[,addr]...>")
+	cmd.PersistentFlags().StringArray("maphost", nil,
+		// [:dstport] is an addition to curl's --resolve
+		"Provide a custom address for a specific host and port pair; e.g. <host:port:addr[:dstport]...>")
 	cmd.Flags().StringP("request", "X", "GET",
 		"Specifies a custom request method to use when communicating with the HTTP server")
 	cmd.Flags().StringP("data", "d", "",
@@ -59,23 +60,23 @@ func die(rc int, format string, args ...interface{}) {
 	os.Exit(rc)
 }
 
-func parseResolves(cmd *cobra.Command) []resolvePair {
-	var res []resolvePair
+func parseHostMappings(cmd *cobra.Command) []hostMapping {
+	var res []hostMapping
 
-	rs, _ := cmd.Flags().GetStringArray("resolve")
-	for _, r := range rs {
-		// format: host:port:addr
+	vals, _ := cmd.Flags().GetStringArray("maphost")
+	for _, r := range vals {
+		// format: src-hostname:src-port:dst-hostname:dst-port
 		i := strings.Index(r, ":")
 		if i < 0 {
-			die(91, "Invalid value for --resolve flag: %q", r)
+			die(91, "Invalid value for --maphost flag: %q", r)
 		}
 
 		j := strings.Index(r[i+1:], ":")
 		if j < 0 {
-			die(91, "Invalid value for --resolve flag: %q", r)
+			die(91, "Invalid value for --maphost flag: %q", r)
 		}
 
-		r := resolvePair{Host: r[:i+1+j], Addr: r[i+1+j+1:]}
+		r := hostMapping{Src: r[:i+1+j], Dst: r[i+1+j+1:]}
 		res = append(res, r)
 	}
 
@@ -210,7 +211,7 @@ func (r httpResponse) writeTo(w io.Writer, withBody bool) {
 	r.Response.Write(w)
 }
 
-func getHttpClient(resolves []resolvePair) *http.Client {
+func getHttpClient(hostMappings []hostMapping) *http.Client {
 	dialer := &net.Dialer{
 		Timeout:   10 * time.Second,
 		KeepAlive: 20 * time.Second,
@@ -230,9 +231,9 @@ func getHttpClient(resolves []resolvePair) *http.Client {
 			ExpectContinueTimeout: 1 * time.Second,
 			Proxy:                 http.ProxyFromEnvironment,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				for _, r := range resolves {
+				for _, r := range hostMappings {
 					if r.Matches(addr) {
-						addr = r.Addr
+						addr = r.DstHost()
 						break
 					}
 				}
@@ -242,13 +243,29 @@ func getHttpClient(resolves []resolvePair) *http.Client {
 	}
 }
 
-type resolvePair struct {
-	// Host is the resolved host (hostname + port).
-	Host string
-	// Addr is the destination address.
-	Addr string
+type hostMapping struct {
+	// Src is the source host in the form of `hostname:port`.
+	Src string
+	// Dst is the destination host in the form of either `hostname:port` or just
+	// `hostname`. If just the hostname is specified without a port then the
+	// source port will be used.
+	Dst string
 }
 
-func (r resolvePair) Matches(addr string) bool {
-	return r.Host == addr
+func (r hostMapping) Matches(addr string) bool {
+	return r.Src == addr
+}
+
+func (r hostMapping) DstHost() string {
+	// Dst already has a port
+	if idx := strings.Index(r.Dst, ":"); idx >= 0 {
+		return r.Dst
+	}
+
+	// Use the source port
+	var port string
+	if idx := strings.Index(r.Src, ":"); idx >= 0 {
+		port = r.Src[idx:]
+	}
+	return r.Dst + port
 }
