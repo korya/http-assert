@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +22,7 @@ func main() {
 		Short: "Perform HTTP request and assert received HTTP response",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			httpClient := getHttpClient(parseHostMappings(cmd))
+			httpClient := getHttpClient(mustParseHostMappings(cmd.Flags().GetStringArray("maphost")))
 
 			m, _ := cmd.Flags().GetString("request")
 			b := io.Reader(http.NoBody)
@@ -38,9 +39,12 @@ func main() {
 			}
 		},
 	}
+	// Deviations from curl's --resolve:
+	// - use `=` to separate src and dst
+	// - add [:dstport]
 	cmd.PersistentFlags().StringArray("maphost", nil,
-		// [:dstport] is an addition to curl's --resolve
-		"Provide a custom address for a specific host and port pair; e.g. <host:port:addr[:dstport]...>")
+		"Provide a custom address for a specific host and port pair; "+
+			"e.g. <srchostname:srcport=dsthostname[:dstport]...>")
 	cmd.Flags().StringP("request", "X", "GET",
 		"Specifies a custom request method to use when communicating with the HTTP server")
 	cmd.Flags().StringP("data", "d", "",
@@ -60,27 +64,40 @@ func die(rc int, format string, args ...interface{}) {
 	os.Exit(rc)
 }
 
-func parseHostMappings(cmd *cobra.Command) []hostMapping {
-	var res []hostMapping
-
-	vals, _ := cmd.Flags().GetStringArray("maphost")
-	for _, r := range vals {
-		// format: src-hostname:src-port:dst-hostname:dst-port
-		i := strings.Index(r, ":")
-		if i < 0 {
-			die(91, "Invalid value for --maphost flag: %q", r)
-		}
-
-		j := strings.Index(r[i+1:], ":")
-		if j < 0 {
-			die(91, "Invalid value for --maphost flag: %q", r)
-		}
-
-		r := hostMapping{Src: r[:i+1+j], Dst: r[i+1+j+1:]}
-		res = append(res, r)
+func mustParseHostMappings(vals []string) []hostMapping {
+	res, err := parseHostMappings(vals)
+	if err != nil {
+		die(91, "Invalid value for --maphost flag: %s")
 	}
 
 	return res
+}
+
+func parseHostMappings(vals []string) ([]hostMapping, error) {
+	var res []hostMapping
+
+	for _, v := range vals {
+		// format: srchostname:srcport=dsthostname:dstport
+		i := strings.Index(v, "=")
+		if i <= 0 {
+			return nil, fmt.Errorf("value %q has no separator, =", v)
+		}
+
+		srchost, dsthost := v[:i], v[i+1:]
+		if j := strings.Index(srchost, ":"); j < 0 {
+			return nil, fmt.Errorf("value %q has no src port %q", v, srchost)
+		} else if _, err := strconv.Atoi(srchost[j+1:]); err != nil {
+			return nil, fmt.Errorf("value %q has invalid src port %q", v, srchost[j+1:])
+		} else if k := strings.Index(dsthost, ":"); k > 0 {
+			if _, err := strconv.Atoi(dsthost[k+1:]); err != nil {
+				return nil, fmt.Errorf("value %q has invalid dst port %q", v, dsthost[k+1:])
+			}
+		}
+
+		res = append(res, hostMapping{Src: srchost, Dst: dsthost})
+	}
+
+	return res, nil
 }
 
 func registerAssertionFlags(cmd *cobra.Command) {
@@ -252,8 +269,8 @@ type hostMapping struct {
 	Dst string
 }
 
-func (r hostMapping) Matches(addr string) bool {
-	return r.Src == addr
+func (r hostMapping) Matches(host string) bool {
+	return r.Src != "" && r.Src == host
 }
 
 func (r hostMapping) DstHost() string {
