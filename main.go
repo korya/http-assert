@@ -83,44 +83,41 @@ func parseResolves(cmd *cobra.Command) []resolvePair {
 }
 
 func registerAssertionFlags(cmd *cobra.Command) {
-	cmd.Flags().Int("status", 0, "Assert response status equals the provided value")
-	cmd.Flags().StringArrayP("header", "H", nil, "Assert header equals the provided regexp")
-	cmd.Flags().StringArrayP("header-match", "M", nil, "Assert header matches the provided regexp")
-	cmd.Flags().StringP("body", "B", "", "Assert body equals the provided value")
-	cmd.Flags().String("body-match", "", "Assert body matches the provided regexp")
+	cmd.Flags().Int("assert-status", 0, "Assert response status equals the provided value")
+	cmd.Flags().StringArray("assert-header", nil, "Assert header equals the provided regexp")
+	cmd.Flags().StringP("assert-body", "B", "", "Assert body equals the provided value")
 
 	// Common shorthands
-	cmd.Flags().Bool("ok", false, "Assert response is successful (2xx)")
-	cmd.Flags().String("redirect-to", "", "Assert response redirects to the provided URL")
-	cmd.Flags().String("redirect-match", "", "Assert response redirects to URL macthing the provided regexp")
+	cmd.Flags().Bool("assert-ok", false, "Assert response is successful (2xx)")
+	cmd.Flags().String("assert-redirect", "", "Assert response redirects to the provided URL")
 }
 
 func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 	var res []Assertion
 
-	if cmd.Flags().Changed("ok") {
-		if v, _ := cmd.Flags().GetBool("ok"); v {
+	if cmd.Flags().Changed("assert-ok") {
+		if v, _ := cmd.Flags().GetBool("assert-ok"); v {
 			res = append(res, AssertStatusOK())
 		} else {
 			res = append(res, AssertStatusNOK())
 		}
 	}
 
-	if cmd.Flags().Changed("redirect-to") {
-		v, _ := cmd.Flags().GetString("redirect-to")
-		res = append(res, AssertRedirectEqual(v))
-	}
-	if cmd.Flags().Changed("redirect-match") {
-		v, _ := cmd.Flags().GetString("redirect-match")
-		res = append(res, AssertRedirectMatch(v))
-	}
-
-	if cmd.Flags().Changed("status") {
-		s, _ := cmd.Flags().GetInt("status")
-		res = append(res, AssertStatus(s))
+	if cmd.Flags().Changed("assert-redirect") {
+		v, _ := cmd.Flags().GetString("assert-redirect")
+		if strings.HasPrefix(v, "=") {
+			res = append(res, AssertRedirectEqual(v[1:]))
+		} else {
+			res = append(res, AssertRedirectMatch(v))
+		}
 	}
 
-	hs, _ := cmd.Flags().GetStringArray("header")
+	if cmd.Flags().Changed("assert-status") {
+		s, _ := cmd.Flags().GetInt("assert-status")
+		res = append(res, AssertStatusEqual(s))
+	}
+
+	hs, _ := cmd.Flags().GetStringArray("assert-header")
 	for _, h := range hs {
 		parts := strings.SplitN(h, ":", 2)
 		name := strings.TrimSpace(parts[0])
@@ -128,35 +125,34 @@ func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 		if len(parts) > 1 {
 			value = strings.TrimSpace(parts[1])
 		}
-		if value == "" {
-			res = append(res, AssertHeaderPresent(name))
+		var exactMatch bool
+		if strings.HasPrefix(name, "=") {
+			name = name[1:]
+			exactMatch = true
+		}
+
+		if exactMatch {
+			if value == "" {
+				res = append(res, AssertHeaderPresent(name))
+			} else {
+				res = append(res, AssertHeaderEqual(name, value))
+			}
 		} else {
-			res = append(res, AssertHeaderEqual(name, value))
+			if value == "" {
+				res = append(res, AssertHeaderPresent(name))
+			} else {
+				res = append(res, AssertHeaderMatch(name, value))
+			}
 		}
 	}
 
-	hms, _ := cmd.Flags().GetStringArray("header-match")
-	for _, h := range hms {
-		parts := strings.SplitN(h, ":", 2)
-		name := strings.TrimSpace(parts[0])
-		var value string
-		if len(parts) > 1 {
-			value = strings.TrimSpace(parts[1])
-		}
-		if value == "" {
-			res = append(res, AssertHeaderPresent(name))
+	if cmd.Flags().Changed("assert-body") {
+		v, _ := cmd.Flags().GetString("assert-body")
+		if strings.HasPrefix(v, "=") {
+			res = append(res, AssertBodyEqual(v[1:]))
 		} else {
-			res = append(res, AssertHeaderMatch(name, value))
+			res = append(res, AssertBodyMatch(v))
 		}
-	}
-
-	if cmd.Flags().Changed("body") {
-		v, _ := cmd.Flags().GetString("body")
-		res = append(res, AssertBodyEqual(v))
-	}
-	if cmd.Flags().Changed("body-match") {
-		v, _ := cmd.Flags().GetString("body-match")
-		res = append(res, AssertBodyMatch(v))
 	}
 
 	return res

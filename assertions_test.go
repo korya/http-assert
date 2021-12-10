@@ -57,7 +57,7 @@ func Test_AssertStatusOK(t *testing.T) {
 	}
 }
 
-func Test_AssertStatus(t *testing.T) {
+func Test_AssertStatusEqual(t *testing.T) {
 	g := gomega.NewWithT(t)
 
 	testCases := []struct {
@@ -80,9 +80,9 @@ func Test_AssertStatus(t *testing.T) {
 		{914, "Custom Response", false},
 	}
 
-	a1 := AssertStatus(1)
-	a200 := AssertStatus(200)
-	a429 := AssertStatus(429)
+	a1 := AssertStatusEqual(1)
+	a200 := AssertStatusEqual(200)
+	a429 := AssertStatusEqual(429)
 	for _, tc := range testCases {
 		res := &httpResponse{
 			Response: &http.Response{

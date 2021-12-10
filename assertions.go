@@ -29,7 +29,7 @@ func AssertStatusNOK() Assertion {
 	}
 }
 
-func AssertStatus(expStatus int) Assertion {
+func AssertStatusEqual(expStatus int) Assertion {
 	return func(res *httpResponse) error {
 		if res.StatusCode != expStatus {
 			return fmt.Errorf("status: expected %d, got %d (%q)",
