@@ -209,6 +209,13 @@ func TestHostMapping_Matches(t *testing.T) {
 		{"example.com:80", "example.com:99", false},
 		{"example.com", "example.com:99", false},
 		{"example.com:99", "example.com:99", true},
+		{"*", "", true},
+		{"*", "example.com", true},
+		{"*", "example.com:99", true},
+		{"*:12", "", false},
+		{"*:12", "example.com", false},
+		{"*:12", "example.com:99", false},
+		{"*:12", "example.com:12", true},
 	}
 
 	for _, tc := range testCases {
