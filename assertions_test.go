@@ -26,10 +26,12 @@ func Test_AssertStatusOK(t *testing.T) {
 		{201, "Created", true},
 		{204, "No Content", true},
 		{299, "Custom OK Response", true},
-		{300, "Multiple Choice", false},
-		{301, "Moved Permanently", false},
-		{307, "Temporary Redirect", false},
+		{300, "Multiple Choice", true},
+		{301, "Moved Permanently", true},
+		{307, "Temporary Redirect", true},
+		{399, "Custom Redirect", true},
 		{400, "Bad Request", false},
+		{401, "Unauthorized", false},
 		{429, "Too Many Requests", false},
 		{500, "Internal Server Error", false},
 		{914, "Custom Response", false},
@@ -213,6 +215,7 @@ func Test_AssertHeader(t *testing.T) {
 	}
 
 	present := AssertHeaderPresent("taRgEt")
+	missing := AssertHeaderMissing("taRgEt")
 	equal := AssertHeaderEqual("taRgET", "value")
 	match := AssertHeaderMatch("taRget", `(?i)^val.*$`)
 	for _, tc := range testCases {
@@ -224,10 +227,14 @@ func Test_AssertHeader(t *testing.T) {
 
 		if !tc.ExpMissing {
 			g.Expect(present(res)).To(gomega.BeNil(), tc.CaseName)
+			g.Expect(missing(res)).To(gomega.MatchError(
+				gomega.MatchRegexp(`header\[taRgEt\]: expected to be missing, got \[.*\]$`),
+			), tc.CaseName)
 		} else {
 			g.Expect(present(res)).To(gomega.MatchError(
 				`header[taRgEt]: expected to be present, missing`,
 			), tc.CaseName)
+			g.Expect(missing(res)).To(gomega.BeNil(), tc.CaseName)
 		}
 
 		if tc.ExpEqualError == "" {
@@ -252,6 +259,7 @@ func Test_AssertBody(t *testing.T) {
 	testCases := []struct {
 		CaseName      string
 		Body          []byte
+		ExpEmptyError string
 		ExpEqualError string
 		ExpMatchError string
 	}{
@@ -269,24 +277,34 @@ func Test_AssertBody(t *testing.T) {
 		{
 			CaseName:      "Non-matching body",
 			Body:          []byte("v"),
+			ExpEmptyError: `body: expected to be empty, got "v"`,
 			ExpEqualError: `body: expected "value", got "v"`,
 			ExpMatchError: `body: expected to match "(?i)^val.*$", got "v"`,
 		},
 		{
 			CaseName:      "Matching body",
 			Body:          []byte("vAl"),
+			ExpEmptyError: `body: expected to be empty, got "vAl"`,
 			ExpEqualError: `body: expected "value", got "vAl"`,
 		},
 		{
-			CaseName: "Exact body",
-			Body:     []byte("value"),
+			CaseName:      "Exact body",
+			Body:          []byte("value"),
+			ExpEmptyError: `body: expected to be empty, got "value"`,
 		},
 	}
 
+	empty := AssertBodyEmpty()
 	equal := AssertBodyEqual("value")
 	match := AssertBodyMatch(`(?i)^val.*$`)
 	for _, tc := range testCases {
 		res := &httpResponse{BodyBytes: tc.Body}
+
+		if tc.ExpEmptyError == "" {
+			g.Expect(empty(res)).To(gomega.BeNil(), tc.CaseName)
+		} else {
+			g.Expect(empty(res)).To(gomega.MatchError(tc.ExpEmptyError), tc.CaseName)
+		}
 
 		if tc.ExpEqualError == "" {
 			g.Expect(equal(res)).To(gomega.BeNil(), tc.CaseName)

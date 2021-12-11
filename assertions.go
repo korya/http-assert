@@ -9,7 +9,7 @@ type Assertion func(res *httpResponse) error
 
 func AssertStatusOK() Assertion {
 	return func(res *httpResponse) error {
-		if s := res.StatusCode; s < 200 || s >= 300 {
+		if s := res.StatusCode; s < 200 || s >= 400 {
 			return fmt.Errorf("ok: expected OK, got %d (%q)",
 				res.StatusCode, res.Status)
 		}
@@ -20,7 +20,7 @@ func AssertStatusOK() Assertion {
 
 func AssertStatusNOK() Assertion {
 	return func(res *httpResponse) error {
-		if s := res.StatusCode; s >= 200 && s < 300 {
+		if s := res.StatusCode; s >= 200 && s < 400 {
 			return fmt.Errorf("nok: expected NOK, got %d (%q)",
 				res.StatusCode, res.Status)
 		}
@@ -44,6 +44,16 @@ func AssertHeaderPresent(name string) Assertion {
 	return func(res *httpResponse) error {
 		if res.Header.Values(name) == nil {
 			return fmt.Errorf("header[%s]: expected to be present, missing", name)
+		}
+
+		return nil
+	}
+}
+
+func AssertHeaderMissing(name string) Assertion {
+	return func(res *httpResponse) error {
+		if vs := res.Header.Values(name); vs != nil {
+			return fmt.Errorf("header[%s]: expected to be missing, got %q", name, vs)
 		}
 
 		return nil
@@ -84,6 +94,16 @@ func AssertHeaderMatch(name, expPattern string) Assertion {
 		}
 
 		return fmt.Errorf("header[%s]: expected to match %q, got %q", name, expPattern, vs)
+	}
+}
+
+func AssertBodyEmpty() Assertion {
+	return func(res *httpResponse) error {
+		if len(res.BodyBytes) > 0 {
+			return fmt.Errorf("body: expected to be empty, got %q", string(res.BodyBytes))
+		}
+
+		return nil
 	}
 }
 
