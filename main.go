@@ -25,8 +25,7 @@ func main() {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			c := Client{
-				Verbose:       viper.GetBool("verbose"),
-				Silent:        viper.GetBool("silent"),
+				LogLevel:      mustParseLogLevel(),
 				SkipSslChecks: viper.GetBool("insecure"),
 				HostMappings:  mustParseHostMappings(viper.GetStringSlice("maphost")),
 			}
@@ -60,6 +59,8 @@ func main() {
 			"e.g. <srchostname:srcport=dsthostname[:dstport]>")
 	cmd.PersistentFlags().BoolP("verbose", "v", false, "Be verbose; log info messages")
 	cmd.PersistentFlags().BoolP("silent", "s", false, "Be silent; log errors only")
+	cmd.PersistentFlags().String("log-level", "",
+		"Set log level; possible values: debug, info (default), warn, error")
 	cmd.PersistentFlags().BoolP("insecure", "k", false, "Disable checking SSL certificates")
 	cmd.Flags().StringP("request", "X", "GET", "Set method for HTTP request")
 	cmd.Flags().StringArrayP("header", "H", nil, "Set header for HTTP request")
@@ -69,9 +70,11 @@ func main() {
 
 	_ = viper.BindPFlag("verbose", cmd.PersistentFlags().Lookup("verbose"))
 	_ = viper.BindPFlag("silent", cmd.PersistentFlags().Lookup("silent"))
+	_ = viper.BindPFlag("log-level", cmd.PersistentFlags().Lookup("log-level"))
 	_ = viper.BindPFlag("insecure", cmd.PersistentFlags().Lookup("insecure"))
 	_ = viper.BindPFlag("maphost", cmd.PersistentFlags().Lookup("maphost"))
 	viper.SetEnvPrefix("HTTP_ASSERT")
+	viper.GetViper().SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	viper.AutomaticEnv()
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -85,6 +88,52 @@ func die(rc int, format string, args ...interface{}) {
 	}
 	fmt.Fprintf(os.Stderr, "\nError: "+format, args...)
 	os.Exit(rc)
+}
+
+type LogLevel int
+
+const (
+	LError LogLevel = iota
+	LWarn
+	LInfo
+	LDebug
+)
+
+func mustParseLogLevel() LogLevel {
+	levelStr := viper.GetString("log-level")
+	if levelStr == "" {
+		if viper.GetBool("verbose") {
+			return LDebug
+		}
+
+		if viper.GetBool("silent") {
+			return LError
+		}
+
+		return LInfo
+	}
+
+	res, ok := parseLogLevel(levelStr)
+	if !ok {
+		die(71, "Invalid value for --log-level flag: %q", levelStr)
+	}
+
+	return res
+}
+
+func parseLogLevel(s string) (LogLevel, bool) {
+	switch s {
+	case "error":
+		return LError, true
+	case "warn":
+		return LWarn, true
+	case "info":
+		return LInfo, true
+	case "debug":
+		return LDebug, true
+	default:
+		return 0, false
+	}
 }
 
 func mustParseHostMappings(vals []string) []hostMapping {
@@ -217,22 +266,17 @@ func parseHeaderAssertions(vs []string, exactMatch bool) []Assertion {
 }
 
 type Client struct {
-	Verbose       bool
-	Silent        bool
+	LogLevel      LogLevel
 	SkipSslChecks bool
 	HostMappings  []hostMapping
 }
 
 func (c *Client) Init() {
-	if c.Verbose {
-		c.Silent = false
-	}
-
 	// Just print the configuration
 	if len(c.HostMappings) > 0 {
-		c.logVerbose("HostMappings %d:\n", len(c.HostMappings))
+		c.logDebug("HostMappings %d:\n", len(c.HostMappings))
 		for i := range c.HostMappings {
-			c.logVerbose("- %q -> %q\n", c.HostMappings[i].Src, c.HostMappings[i].Dst)
+			c.logDebug("- %q -> %q\n", c.HostMappings[i].Src, c.HostMappings[i].Dst)
 		}
 	}
 }
@@ -242,7 +286,7 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 		return fmt.Errorf("no assertions defined")
 	}
 
-	c.logDefault("[.] %s %s %s", req.Proto, req.Method, req.URL)
+	c.logInfo("[.] %s %s %s", req.Proto, req.Method, req.URL)
 	startedAt := time.Now()
 	res, err := c.getHttpClient().Do(req)
 	if err != nil {
@@ -253,7 +297,7 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 	}
 	defer res.Body.Close()
 
-	c.logDefault("[:] %s %s\n", res.Proto, res.Status)
+	c.logInfo("[:] %s %s\n", res.Proto, res.Status)
 	httpRes := &httpResponse{Response: res}
 	httpRes.BodyBytes, _ = io.ReadAll(res.Body)
 
@@ -264,7 +308,7 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 		}
 	}
 	if len(assertErrors) > 0 {
-		c.logDefault("[-] FAILED %s\n\n", time.Since(startedAt))
+		c.logInfo("[-] FAILED %s\n\n", time.Since(startedAt))
 
 		var b strings.Builder
 		fmt.Fprintf(&b, "%d assertions failed:\n", len(assertErrors))
@@ -275,7 +319,7 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 		return errors.New(b.String())
 	}
 
-	c.logDefault("[+] PASSED %s\n\n", time.Since(startedAt))
+	c.logInfo("[+] PASSED %s\n\n", time.Since(startedAt))
 	return nil
 }
 
@@ -284,31 +328,9 @@ func (c Client) writeHttpDetails(w io.Writer, req *http.Request, res *httpRespon
 	_ = req.Write(w)
 	_, _ = w.Write([]byte("\n\n"))
 	if res != nil {
-		res.writeTo(w, c.Verbose)
+		res.writeTo(w, c.LogLevel >= LInfo)
 		_, _ = w.Write([]byte("\n\n"))
 	}
-}
-
-func (c Client) logVerbose(format string, args ...interface{}) {
-	if !c.Verbose {
-		return
-	}
-
-	if !strings.HasSuffix(format, "\n") {
-		format += "\n"
-	}
-	fmt.Fprintf(os.Stderr, format, args...)
-}
-
-func (c Client) logDefault(format string, args ...interface{}) {
-	if c.Silent {
-		return
-	}
-
-	if !strings.HasSuffix(format, "\n") {
-		format += "\n"
-	}
-	fmt.Fprintf(os.Stderr, format, args...)
 }
 
 func (c Client) getHttpClient() *http.Client {
@@ -349,6 +371,35 @@ func (c Client) getDstHost(addr string) string {
 	}
 
 	return addr
+}
+
+func (c Client) logDebug(format string, args ...interface{}) {
+	c.log(LDebug, format, args...)
+}
+
+func (c Client) logInfo(format string, args ...interface{}) {
+	c.log(LInfo, format, args...)
+}
+
+//nolint:unused
+func (c Client) logWarn(format string, args ...interface{}) {
+	c.log(LWarn, format, args...)
+}
+
+//nolint:unused
+func (c Client) logError(format string, args ...interface{}) {
+	c.log(LError, format, args...)
+}
+
+func (c Client) log(l LogLevel, format string, args ...interface{}) {
+	if l > c.LogLevel {
+		return
+	}
+
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
+	}
+	fmt.Fprintf(os.Stderr, format, args...)
 }
 
 type httpResponse struct {
