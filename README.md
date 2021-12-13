@@ -1,1 +1,1 @@
-# http-assert ![example workflow](https://github.com/PlanitarInc/http-assert/actions/workflows/build.yml/badge.svg)
+# http-assert ![Github Actions](https://github.com/PlanitarInc/http-assert/actions/workflows/build.yml/badge.svg) [![Go Reference](https://pkg.go.dev/badge/github.com/PlanitarInc/http-assert.svg)](https://pkg.go.dev/github.com/PlanitarInc/http-assert)
