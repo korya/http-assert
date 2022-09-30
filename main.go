@@ -27,6 +27,7 @@ func main() {
 			c := Client{
 				LogLevel:      mustParseLogLevel(),
 				SkipSslChecks: viper.GetBool("insecure"),
+				Timeout:       time.Duration(viper.GetInt("max-time")) * time.Second,
 				HostMappings:  mustParseHostMappings(viper.GetStringSlice("maphost")),
 			}
 			c.Init()
@@ -62,6 +63,8 @@ func main() {
 	cmd.PersistentFlags().String("log-level", "",
 		"Set log level; possible values: debug, info (default), warn, error")
 	cmd.PersistentFlags().BoolP("insecure", "k", false, "Disable checking SSL certificates")
+	cmd.PersistentFlags().IntP("max-time", "m", 20,
+		"Maximum  time  in seconds that you allow each request to take")
 	cmd.Flags().StringP("request", "X", "GET", "Set method for HTTP request")
 	cmd.Flags().StringArrayP("header", "H", nil, "Set header for HTTP request")
 	cmd.Flags().StringP("data", "d", "",
@@ -72,6 +75,7 @@ func main() {
 	_ = viper.BindPFlag("silent", cmd.PersistentFlags().Lookup("silent"))
 	_ = viper.BindPFlag("log-level", cmd.PersistentFlags().Lookup("log-level"))
 	_ = viper.BindPFlag("insecure", cmd.PersistentFlags().Lookup("insecure"))
+	_ = viper.BindPFlag("max-time", cmd.PersistentFlags().Lookup("max-time"))
 	_ = viper.BindPFlag("maphost", cmd.PersistentFlags().Lookup("maphost"))
 	viper.SetEnvPrefix("HTTP_ASSERT")
 	viper.GetViper().SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
@@ -268,6 +272,7 @@ func parseHeaderAssertions(vs []string, exactMatch bool) []Assertion {
 type Client struct {
 	LogLevel      LogLevel
 	SkipSslChecks bool
+	Timeout       time.Duration
 	HostMappings  []hostMapping
 }
 
@@ -355,7 +360,7 @@ func (c Client) getHttpClient() *http.Client {
 	}
 
 	return &http.Client{
-		Timeout: 20 * time.Second,
+		Timeout: c.Timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse // Disallow redirects
 		},
