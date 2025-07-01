@@ -300,7 +300,7 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 		c.writeHttpDetails(&b, req, nil)
 		return errors.New(b.String())
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	c.logInfo("[:] %s %s\n", res.Proto, res.Status)
 	httpRes := &httpResponse{Response: res}
@@ -329,7 +329,7 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 }
 
 func (c Client) writeHttpDetails(w io.Writer, req *http.Request, res *httpResponse) {
-	fmt.Fprintf(w, "\nFAILED: %s %s (%s)\n\n", req.Method, req.URL, req.Proto)
+	_, _ = fmt.Fprintf(w, "\nFAILED: %s %s (%s)\n\n", req.Method, req.URL, req.Proto)
 	_ = req.Write(w)
 	_, _ = w.Write([]byte("\n\n"))
 	if res != nil {
@@ -356,7 +356,7 @@ func (c Client) getHttpClient() *http.Client {
 		},
 	}
 	if c.SkipSslChecks {
-		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 - user askef for it
 	}
 
 	return &http.Client{
@@ -414,19 +414,19 @@ type httpResponse struct {
 
 func (r httpResponse) writeTo(w io.Writer, withBody bool) {
 	// Ensure to close previous body
-	b := r.Response.Body
-	defer b.Close()
+	b := r.Body
+	defer func() { _ = b.Close() }()
 	if withBody {
 		var b bytes.Buffer
 		croppedBytes := printPayload(&b, r.BodyBytes, 256)
 		if croppedBytes > 0 {
 			fmt.Fprintf(&b, "\n\n  << Payload is cropped: %d bytes are hidden >>", croppedBytes)
 		}
-		r.Response.Body = io.NopCloser(&b)
+		r.Body = io.NopCloser(&b)
 	} else {
-		r.Response.Body = io.NopCloser(strings.NewReader("  << Payload is omitted >>"))
+		r.Body = io.NopCloser(strings.NewReader("  << Payload is omitted >>"))
 	}
-	_ = r.Response.Write(w)
+	_ = r.Write(w)
 }
 
 type hostMapping struct {

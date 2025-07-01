@@ -30,7 +30,7 @@ func printPayload(w io.Writer, bs []byte, maxSize int) (croppedBytes int) {
 		_, _ = w.Write(bs)
 	} else {
 		d := hex.Dumper(w)
-		defer d.Close()
+		defer func() { _ = d.Close() }()
 		_, _ = d.Write(bs)
 	}
 	return

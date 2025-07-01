@@ -11,7 +11,7 @@ build-release:
     go build -ldflags="-s -w" -o http-assert .
 
 [doc("Run all pre-commit checks")]
-pre-commit: build vet lint test test-race test-cover
+pre-commit: build vet lint test test-race test-cover security
 
 [doc("Build and check compilation without creating binary")]
 check:
