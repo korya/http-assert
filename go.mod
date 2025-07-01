@@ -1,4 +1,4 @@
-module github.com/PlanitarInc/http-assert
+module github.com/korya/http-assert
 
 go 1.17
 

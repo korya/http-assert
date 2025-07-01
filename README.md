@@ -1,4 +1,4 @@
-# http-assert ![Github Actions](https://github.com/PlanitarInc/http-assert/actions/workflows/build.yml/badge.svg) [![Go Reference](https://pkg.go.dev/badge/github.com/PlanitarInc/http-assert.svg)](https://pkg.go.dev/github.com/PlanitarInc/http-assert)
+# http-assert ![Github Actions](https://github.com/korya/http-assert/actions/workflows/build.yml/badge.svg) [![Go Reference](https://pkg.go.dev/badge/github.com/korya/http-assert.svg)](https://pkg.go.dev/github.com/korya/http-assert)
 
 A command-line tool for performing HTTP requests and asserting properties of the response. This tool is designed for testing HTTP endpoints, health checks, monitoring, and CI/CD pipelines.
 
@@ -17,13 +17,13 @@ A command-line tool for performing HTTP requests and asserting properties of the
 ### From Source
 
 ```bash
-go install github.com/PlanitarInc/http-assert@latest
+go install github.com/korya/http-assert@latest
 ```
 
 ### Build from Repository
 
 ```bash
-git clone https://github.com/PlanitarInc/http-assert.git
+git clone https://github.com/korya/http-assert.git
 cd http-assert
 go build -o http-assert .
 ```
