@@ -1,6 +1,6 @@
-module github.com/PlanitarInc/http-assert
+module github.com/korya/http-assert
 
-go 1.17
+go 1.24.4
 
 require (
 	github.com/onsi/gomega v1.17.0
