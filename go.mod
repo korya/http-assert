@@ -1,6 +1,6 @@
 module github.com/korya/http-assert
 
-go 1.24.4
+go 1.25.5
 
 require (
 	github.com/onsi/gomega v1.38.3
