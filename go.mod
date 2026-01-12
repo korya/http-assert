@@ -3,7 +3,7 @@ module github.com/korya/http-assert
 go 1.25.5
 
 require (
-	github.com/onsi/gomega v1.38.3
+	github.com/onsi/gomega v1.39.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 )
