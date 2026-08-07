@@ -72,8 +72,8 @@ func cliFlags(t *testing.T) []flagSpec {
 
 	// Guards against a --help format change turning this into a no-op that
 	// probes nothing and passes.
-	if len(out) < 19 {
-		t.Fatalf("parsed only %d flags from --help, expected at least 19 -- parser is stale", len(out))
+	if len(out) < 20 {
+		t.Fatalf("parsed only %d flags from --help, expected at least 20 -- parser is stale", len(out))
 	}
 
 	return out
