@@ -37,3 +37,12 @@ jobs:
 
     - name: Run end-to-end tests
       run: just test-e2e
+
+    # The release configuration is otherwise only exercised when a tag is
+    # pushed, which is the worst moment to discover it is broken. Cross-compiles
+    # every published target and publishes nothing.
+    - name: Build the release artifacts
+      uses: goreleaser/goreleaser-action@v7
+      with:
+        version: '~> v2'
+        args: build --snapshot --clean
