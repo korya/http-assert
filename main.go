@@ -20,9 +20,10 @@ import (
 
 func main() {
 	cmd := &cobra.Command{
-		Use:   "http-assert <URL>",
-		Short: "Perform HTTP request and assert received HTTP response",
-		Args:  cobra.ExactArgs(1),
+		Use:     "http-assert <URL>",
+		Short:   "Perform HTTP request and assert received HTTP response",
+		Version: versionString(),
+		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			insecure, _ := cmd.Flags().GetBool("insecure")
 			maxTime, _ := cmd.Flags().GetInt("max-time")
