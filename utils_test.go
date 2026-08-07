@@ -77,6 +77,13 @@ func Test_printPayload(t *testing.T) {
 			CroppedBytes: 10,
 		},
 		{
+			CaseName:     "negative max size is treated as zero",
+			Input:        []byte("single line"),
+			MaxSize:      -1,
+			Output:       "",
+			CroppedBytes: 11,
+		},
+		{
 			CaseName:     "single line, ASCII, 0",
 			Input:        []byte("single line"),
 			MaxSize:      0,
