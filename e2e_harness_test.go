@@ -1,6 +1,7 @@
 package main_test
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,6 +19,15 @@ import (
 // #55 run() extraction, #56 assertion constructors), which is the property that
 // makes those refactors safe to perform.
 
+// runE2E gates the whole suite. It is opt-in: `go test ./...` runs the unit
+// tests only, and the end-to-end tests run when explicitly asked for.
+//
+// A registered flag is used rather than a build tag on purpose. A tagged file
+// is invisible to `go vet` and `golangci-lint` unless every invocation passes
+// the tag, so tagging would silently drop this file out of both -- verified,
+// and the reason the switch lives here instead.
+var runE2E = flag.Bool("e2e", false, "run the end-to-end suite (builds and executes the CLI)")
+
 var (
 	binPath  string
 	buildErr error
@@ -34,6 +44,10 @@ func coverDir() string { return os.Getenv("E2E_COVERDIR") }
 // toward the reported coverage.
 func binary(t *testing.T) string {
 	t.Helper()
+
+	if !*runE2E {
+		t.Skip("e2e: pass -e2e to run (or use `just test-e2e`)")
+	}
 
 	buildOne.Do(func() {
 		dir, err := os.MkdirTemp("", "http-assert-e2e")
