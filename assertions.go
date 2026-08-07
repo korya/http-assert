@@ -7,6 +7,10 @@ import (
 
 type Assertion func(res *httpResponse) error
 
+// Pattern-based assertions are built from user input and so can fail before any
+// response exists. They return an error rather than panicking; every other
+// constructor in this file is infallible and returns an Assertion directly.
+
 func AssertStatusOK() Assertion {
 	return func(res *httpResponse) error {
 		if s := res.StatusCode; s < 200 || s >= 400 {
@@ -77,8 +81,11 @@ func AssertHeaderEqual(name, expValue string) Assertion {
 	}
 }
 
-func AssertHeaderMatch(name, expPattern string) Assertion {
-	re := regexp.MustCompile(expPattern)
+func AssertHeaderMatch(name, expPattern string) (Assertion, error) {
+	re, err := regexp.Compile(expPattern)
+	if err != nil {
+		return nil, err
+	}
 
 	return func(res *httpResponse) error {
 		vs := res.Header.Values(name)
@@ -94,7 +101,7 @@ func AssertHeaderMatch(name, expPattern string) Assertion {
 		}
 
 		return fmt.Errorf("header[%s]: expected to match %q, got %q", name, expPattern, vs)
-	}
+	}, nil
 }
 
 func AssertBodyEmpty() Assertion {
@@ -121,8 +128,11 @@ func AssertBodyEqual(expContent string) Assertion {
 	}
 }
 
-func AssertBodyMatch(expPattern string) Assertion {
-	re := regexp.MustCompile(expPattern)
+func AssertBodyMatch(expPattern string) (Assertion, error) {
+	re, err := regexp.Compile(expPattern)
+	if err != nil {
+		return nil, err
+	}
 
 	return func(res *httpResponse) error {
 		if len(res.BodyBytes) == 0 {
@@ -134,7 +144,7 @@ func AssertBodyMatch(expPattern string) Assertion {
 		}
 
 		return nil
-	}
+	}, nil
 }
 
 func AssertRedirectEqual(expLocation string) Assertion {
@@ -157,8 +167,11 @@ func AssertRedirectEqual(expLocation string) Assertion {
 	}
 }
 
-func AssertRedirectMatch(expPattern string) Assertion {
-	re := regexp.MustCompile(expPattern)
+func AssertRedirectMatch(expPattern string) (Assertion, error) {
+	re, err := regexp.Compile(expPattern)
+	if err != nil {
+		return nil, err
+	}
 
 	return func(res *httpResponse) error {
 		if s := res.StatusCode; s < 300 || s >= 400 {
@@ -176,5 +189,5 @@ func AssertRedirectMatch(expPattern string) Assertion {
 		}
 
 		return nil
-	}
+	}, nil
 }

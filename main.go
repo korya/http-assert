@@ -227,6 +227,21 @@ func registerAssertionFlags(cmd *cobra.Command) {
 	cmd.Flags().String("assert-redirect-eq", "", "Assert response redirects to the provided URL")
 }
 
+// mustCompileAssertion builds a pattern-based assertion, reporting an
+// unparseable pattern the way every other invalid flag value is reported.
+//
+// Without this the pattern reached regexp.MustCompile and the process died with
+// a stack trace and exit code 2, which is not part of the documented contract
+// and gave the user no idea which flag was at fault (#17).
+func mustCompileAssertion(flag, pattern string, build func(string) (Assertion, error)) Assertion {
+	a, err := build(pattern)
+	if err != nil {
+		die(71, "Invalid value for %s flag: %s", flag, err)
+	}
+
+	return a
+}
+
 func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 	var res []Assertion
 
@@ -240,7 +255,7 @@ func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 
 	if cmd.Flags().Changed("assert-redirect") {
 		v, _ := cmd.Flags().GetString("assert-redirect")
-		res = append(res, AssertRedirectMatch(v))
+		res = append(res, mustCompileAssertion("--assert-redirect", v, AssertRedirectMatch))
 	}
 	if cmd.Flags().Changed("assert-redirect-eq") {
 		v, _ := cmd.Flags().GetString("assert-redirect-eq")
@@ -269,7 +284,7 @@ func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 
 	if cmd.Flags().Changed("assert-body") {
 		v, _ := cmd.Flags().GetString("assert-body")
-		res = append(res, AssertBodyMatch(v))
+		res = append(res, mustCompileAssertion("--assert-body", v, AssertBodyMatch))
 	}
 	if cmd.Flags().Changed("assert-body-eq") {
 		v, _ := cmd.Flags().GetString("assert-body-eq")
@@ -297,7 +312,8 @@ func parseHeaderAssertions(vs []string, exactMatch bool) []Assertion {
 			if value == "" {
 				res = append(res, AssertHeaderPresent(name))
 			} else {
-				res = append(res, AssertHeaderMatch(name, value))
+				res = append(res, mustCompileAssertion("--assert-header", value,
+					func(p string) (Assertion, error) { return AssertHeaderMatch(name, p) }))
 			}
 		}
 	}

@@ -13,29 +13,37 @@ import (
 // the fix. Select them all with:
 //
 //	go test -run 'TestKnown' ./...
+
+// TestIssue17BadPatternIsRejected pins that an unparseable pattern is reported
+// as an invalid flag value rather than reaching the runtime as a panic.
 //
-// exitPanic is not part of the documented contract -- it is what a Go panic
-// produces, and reaching it is itself the bug (#17).
-const exitPanic = 2
+// This test previously asserted the panic. It flipped when #17 was fixed, which
+// is the record of that change.
+func TestIssue17BadPatternIsRejected(t *testing.T) {
+	for _, tc := range []struct {
+		Flag string
+		Arg  string
+	}{
+		{"--assert-body", "[unclosed"},
+		{"--assert-header", "X-Any: (unclosed"},
+		{"--assert-redirect", "[unclosed"},
+	} {
+		t.Run(tc.Flag, func(t *testing.T) {
+			r := run(t, nil, tc.Flag, tc.Arg, url("/ok"))
 
-// TestKnownIssue17RegexPanic: an invalid regexp crashes with a stack trace
-// instead of reporting an invalid flag value.
-func TestKnownIssue17RegexPanic(t *testing.T) {
-	for _, flag := range []string{"--assert-body", "--assert-header", "--assert-redirect"} {
-		t.Run(flag, func(t *testing.T) {
-			characterizes(t, 17, flag+" panics on an unparseable pattern")
-
-			arg := "[unclosed"
-			if flag == "--assert-header" {
-				arg = "X-Any: (unclosed"
-			}
-			r := run(t, nil, flag, arg, url("/ok"))
-
-			assertExit(t, r, exitPanic)
-			assertContains(t, r, "panic: regexp: Compile")
-			assertContains(t, r, "goroutine 1 [running]:")
+			assertExit(t, r, exitBadFlagVal)
+			// The flag at fault is named, and the parser's reason survives.
+			assertContains(t, r, "Invalid value for "+tc.Flag+" flag")
+			assertContains(t, r, "error parsing regexp")
+			assertNotContains(t, r, "panic:")
+			assertNotContains(t, r, "goroutine")
 		})
 	}
+
+	// A pattern that compiles is unaffected.
+	t.Run("valid patterns still work", func(t *testing.T) {
+		assertExit(t, run(t, nil, "--assert-body", `"status":\s*"success"`, url("/ok")), exitOK)
+	})
 }
 
 // TestKnownIssue18PayloadTruncated: the response dump replaces the body with a
