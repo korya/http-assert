@@ -1,0 +1,42 @@
+version: 2
+
+builds:
+  - id: http-assert
+    # A tool whose job is to run inside pipelines and scratch images has no
+    # business linking against a libc that might not be there.
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    # main.version is the release identity; without it the binary falls back to
+    # the pseudo-version Go derives from the commit, which is accurate but not
+    # the tag anybody asked for. The v prefix keeps a downloaded binary saying
+    # the same thing as one from `go install ...@v0.1.0`.
+    #
+    # .Version rather than .Tag: in snapshot mode .Tag is the *previous* tag, so
+    # stamping it would have a snapshot build claim to be a release it is not.
+    ldflags:
+      - -s -w -X main.version=v{{ .Version }}
+    # Reproducible builds: without this the archive timestamp is "now", so two
+    # builds of the same commit produce different checksums.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github

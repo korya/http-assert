@@ -98,7 +98,7 @@ test-cover-func:
 
 [doc("Clean build artifacts")]
 clean:
-    rm -f http-assert coverage.out coverage.html
+    rm -rf http-assert coverage.out coverage.html dist
 
 [doc("Install the binary to $GOPATH/bin")]
 install:
@@ -116,6 +116,13 @@ deps-update:
 [doc("Download dependencies")]
 deps-download:
     go mod download
+
+[doc("Build the release artifacts locally without publishing anything")]
+release-snapshot:
+    # Exercises the whole release pipeline -- cross-compilation, archives,
+    # checksums -- against the working tree. Publishes nothing and needs no
+    # tag, so it is safe to run at any point.
+    goreleaser release --snapshot --clean
 
 [doc("Run every check CI runs, including the end-to-end suite")]
 pre-push: pre-commit test-e2e
