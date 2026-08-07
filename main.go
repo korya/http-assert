@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
+	"github.com/spf13/pflag"
 )
 
 func main() {
@@ -24,11 +24,14 @@ func main() {
 		Short: "Perform HTTP request and assert received HTTP response",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
+			insecure, _ := cmd.Flags().GetBool("insecure")
+			maxTime, _ := cmd.Flags().GetInt("max-time")
+			maphost, _ := cmd.Flags().GetStringArray("maphost")
 			c := Client{
-				LogLevel:      mustParseLogLevel(),
-				SkipSslChecks: viper.GetBool("insecure"),
-				Timeout:       time.Duration(viper.GetInt("max-time")) * time.Second,
-				HostMappings:  mustParseHostMappings(viper.GetStringSlice("maphost")),
+				LogLevel:      mustParseLogLevel(cmd),
+				SkipSslChecks: insecure,
+				Timeout:       time.Duration(maxTime) * time.Second,
+				HostMappings:  mustParseHostMappings(maphost),
 			}
 			c.Init()
 
@@ -71,18 +74,53 @@ func main() {
 		"Sends the specified data in a POST request to the HTTP server")
 	registerAssertionFlags(cmd)
 
-	_ = viper.BindPFlag("verbose", cmd.PersistentFlags().Lookup("verbose"))
-	_ = viper.BindPFlag("silent", cmd.PersistentFlags().Lookup("silent"))
-	_ = viper.BindPFlag("log-level", cmd.PersistentFlags().Lookup("log-level"))
-	_ = viper.BindPFlag("insecure", cmd.PersistentFlags().Lookup("insecure"))
-	_ = viper.BindPFlag("max-time", cmd.PersistentFlags().Lookup("max-time"))
-	_ = viper.BindPFlag("maphost", cmd.PersistentFlags().Lookup("maphost"))
-	viper.SetEnvPrefix("HTTP_ASSERT")
-	viper.GetViper().SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
-	viper.AutomaticEnv()
+	cmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
+		applyEnv(cmd.Flags())
+	}
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		die(103, "%s", err)
+	}
+}
+
+// envFlags are the options that can also be set through the environment, as
+// HTTP_ASSERT_<NAME> with dashes replaced by underscores.
+//
+// Deliberately a list rather than every flag. Repeatable options take several
+// values from one variable by splitting on whitespace, which suits host
+// mappings but would corrupt header values, and those routinely contain spaces.
+var envFlags = []string{"verbose", "silent", "log-level", "insecure", "max-time", "maphost"}
+
+// applyEnv fills in the options the caller did not pass on the command line.
+// Precedence is command line, then environment, then the flag default.
+func applyEnv(fs *pflag.FlagSet) {
+	for _, name := range envFlags {
+		f := fs.Lookup(name)
+		if f == nil || f.Changed {
+			continue // the command line wins
+		}
+
+		v, ok := os.LookupEnv("HTTP_ASSERT_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")))
+		if !ok || v == "" {
+			continue // an empty variable counts as unset
+		}
+
+		if sv, isSlice := f.Value.(pflag.SliceValue); isSlice {
+			_ = sv.Replace(strings.Fields(v))
+			continue
+		}
+
+		if err := f.Value.Set(v); err != nil {
+			// An unparseable value becomes the type's zero value rather than an
+			// error. Preserved verbatim from the previous implementation so that
+			// this change is behaviour-preserving; rejected in a later commit.
+			switch f.Value.Type() {
+			case "int":
+				_ = f.Value.Set("0")
+			case "bool":
+				_ = f.Value.Set("false")
+			}
+		}
 	}
 }
 
@@ -103,14 +141,14 @@ const (
 	LDebug
 )
 
-func mustParseLogLevel() LogLevel {
-	levelStr := viper.GetString("log-level")
+func mustParseLogLevel(cmd *cobra.Command) LogLevel {
+	levelStr, _ := cmd.Flags().GetString("log-level")
 	if levelStr == "" {
-		if viper.GetBool("verbose") {
+		if v, _ := cmd.Flags().GetBool("verbose"); v {
 			return LDebug
 		}
 
-		if viper.GetBool("silent") {
+		if v, _ := cmd.Flags().GetBool("silent"); v {
 			return LError
 		}
 
