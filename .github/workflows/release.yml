@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # goreleaser builds the changelog from the range between this tag and
+        # the previous one, which a shallow clone does not contain.
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Install just
+      uses: extractions/setup-just@v3
+
+    # A tag can be cut from any commit, not only one that master already proved
+    # green. Twenty seconds here is cheaper than a published binary that does
+    # not work and a version number that cannot be reused.
+    - name: Run end-to-end tests
+      run: just test-e2e
+
+    - name: Publish the release
+      uses: goreleaser/goreleaser-action@v7
+      with:
+        version: '~> v2'
+        args: release --clean
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
