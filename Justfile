@@ -11,11 +11,15 @@ build-release:
     go build -ldflags="-s -w" -o http-assert .
 
 [doc("Run all pre-commit checks")]
-pre-commit: build vet lint test test-race security
+pre-commit: build tidy-check vet lint test test-race security
 
 [doc("Build and check compilation without creating binary")]
 check:
     go build -o /dev/null .
+
+[doc("Fail if go.mod or go.sum is not tidy")]
+tidy-check:
+    go mod tidy -diff
 
 [doc("Run go vet")]
 vet:
