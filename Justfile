@@ -11,7 +11,7 @@ build-release:
     go build -ldflags="-s -w" -o http-assert .
 
 [doc("Run all pre-commit checks")]
-pre-commit: build tidy-check vet lint test test-race security
+pre-commit: build tidy-check lint-config-check vet lint test test-race security
 
 [doc("Build and check compilation without creating binary")]
 check:
@@ -20,6 +20,28 @@ check:
 [doc("Fail if go.mod or go.sum is not tidy")]
 tidy-check:
     go mod tidy -diff
+
+[doc("Fail if the standard linters are no longer enabled")]
+lint-config-check:
+    #!/usr/bin/env bash
+    # .golangci.yml is meant to ADD to the default linter set, never replace it.
+    # Setting `linters.default: none` would silently drop the standard linters,
+    # and nothing would fail -- fewer linters simply means fewer findings. This
+    # asserts the set we expect to be active really is.
+    set -euo pipefail
+    enabled=$(golangci-lint linters | sed -n '/^Enabled/,/^Disabled/p' | grep -oE '^[a-z0-9]+' || true)
+    # Distinguish "could not parse" from "the set really did shrink" -- both
+    # must fail, but conflating them sends the next reader to the wrong file.
+    if [ -z "$enabled" ]; then
+      echo "cannot read the enabled linters from 'golangci-lint linters'; the parser is stale" >&2
+      exit 1
+    fi
+    for l in errcheck govet ineffassign staticcheck unused forbidigo; do
+      if ! echo "$enabled" | grep -qx "$l"; then
+        echo "linter '$l' is no longer enabled -- check linters.default in .golangci.yml" >&2
+        exit 1
+      fi
+    done
 
 [doc("Run go vet")]
 vet:
