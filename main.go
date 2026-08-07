@@ -293,7 +293,10 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 
 	c.logInfo("[.] %s %s %s", req.Proto, req.Method, req.URL)
 	startedAt := time.Now()
-	res, err := c.getHttpClient().Do(req)
+	// G704: the request URL comes from the operator's own command line, and
+	// fetching it is the entire purpose of this tool -- no trust boundary is
+	// crossed, so this is not SSRF.
+	res, err := c.getHttpClient().Do(req) // #nosec G704 - user asked for this URL
 	if err != nil {
 		var b strings.Builder
 		fmt.Fprintf(&b, "failed to send request:\n- %s\n", err)
@@ -356,7 +359,7 @@ func (c Client) getHttpClient() *http.Client {
 		},
 	}
 	if c.SkipSslChecks {
-		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 - user askef for it
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 - user asked for it
 	}
 
 	return &http.Client{
