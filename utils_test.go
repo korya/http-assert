@@ -3,13 +3,9 @@ package main
 import (
 	"strings"
 	"testing"
-
-	"github.com/onsi/gomega"
 )
 
 func Test_parseHeaderLine(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	t.Parallel()
 
 	testCases := []struct {
@@ -36,17 +32,18 @@ func Test_parseHeaderLine(t *testing.T) {
 		{"   content-length   :    one - tWo - thRee     ", "Content-Length", "one - tWo - thRee"},
 	}
 
-	type h struct{ Name, Value string }
-
 	for _, tc := range testCases {
-		name, value := parseHeaderLine(tc.Input)
-		g.Expect(h{name, value}).To(gomega.Equal(h{tc.ExpName, tc.ExpValue}), tc.Input)
+		t.Run(tc.Input, func(t *testing.T) {
+			name, value := parseHeaderLine(tc.Input)
+			if name != tc.ExpName || value != tc.ExpValue {
+				t.Errorf("parseHeaderLine(%q) = (%q, %q), want (%q, %q)",
+					tc.Input, name, value, tc.ExpName, tc.ExpValue)
+			}
+		})
 	}
 }
 
 func Test_printPayload(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	t.Parallel()
 
 	testCases := []struct {
@@ -116,9 +113,15 @@ func Test_printPayload(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		var b strings.Builder
-		n := printPayload(&b, tc.Input, tc.MaxSize)
-		g.Expect(b.String()).To(gomega.Equal(tc.Output), tc.CaseName)
-		g.Expect(n).To(gomega.Equal(tc.CroppedBytes), tc.CaseName)
+		t.Run(tc.CaseName, func(t *testing.T) {
+			var b strings.Builder
+			n := printPayload(&b, tc.Input, tc.MaxSize)
+			if got := b.String(); got != tc.Output {
+				t.Errorf("printPayload wrote %q, want %q", got, tc.Output)
+			}
+			if n != tc.CroppedBytes {
+				t.Errorf("printPayload cropped %d bytes, want %d", n, tc.CroppedBytes)
+			}
+		})
 	}
 }
