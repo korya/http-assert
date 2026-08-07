@@ -178,7 +178,16 @@ http-assert \
 
 ### Environment Variables
 
-You can also configure the tool using environment variables with the `HTTP_ASSERT_` prefix:
+Six options can be set through the environment, using the `HTTP_ASSERT_` prefix with dashes replaced by underscores:
+
+| Variable | Equivalent flag |
+|----------|-----------------|
+| `HTTP_ASSERT_VERBOSE` | `--verbose` |
+| `HTTP_ASSERT_SILENT` | `--silent` |
+| `HTTP_ASSERT_LOG_LEVEL` | `--log-level` |
+| `HTTP_ASSERT_INSECURE` | `--insecure` |
+| `HTTP_ASSERT_MAX_TIME` | `--max-time` |
+| `HTTP_ASSERT_MAPHOST` | `--maphost` |
 
 ```bash
 export HTTP_ASSERT_VERBOSE=true
@@ -187,6 +196,22 @@ export HTTP_ASSERT_INSECURE=true
 
 http-assert --assert-ok https://api.example.com
 ```
+
+**The remaining options are command-line only.** `--request`, `--header`, `--data` and every `--assert-*` flag ignore the environment; setting `HTTP_ASSERT_REQUEST=POST` has no effect.
+
+**A command-line flag always wins over the environment**, which in turn wins over the built-in default.
+
+**`HTTP_ASSERT_MAPHOST` separates multiple mappings with whitespace, not commas:**
+
+```bash
+# Two mappings
+export HTTP_ASSERT_MAPHOST="api.example.com:443=backend1:8443 api.example.com:80=backend1:8080"
+
+# NOT a list -- parsed as one malformed mapping, exits 71
+export HTTP_ASSERT_MAPHOST="api.example.com:443=backend1:8443,api.example.com:80=backend1:8080"
+```
+
+Repeating `--maphost` on the command line accumulates as usual.
 
 ### Exit Codes
 
