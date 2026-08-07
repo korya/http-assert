@@ -22,6 +22,13 @@ func parseHeaderLine(l string) (name, value string) {
 }
 
 func printPayload(w io.Writer, bs []byte, maxSize int) (croppedBytes int) {
+	// A negative limit would slice to a negative bound and panic. The only
+	// caller passes a constant, so this is unreachable today -- but the
+	// function is exported to the rest of the package and should be total.
+	if maxSize < 0 {
+		maxSize = 0
+	}
+
 	if n := len(bs); n > maxSize {
 		bs = bs[:maxSize]
 		croppedBytes = n - maxSize
