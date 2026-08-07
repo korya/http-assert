@@ -11,7 +11,7 @@ build-release:
     go build -ldflags="-s -w" -o http-assert .
 
 [doc("Run all pre-commit checks")]
-pre-commit: build vet lint test test-race test-cover security
+pre-commit: build vet lint test test-race security
 
 [doc("Build and check compilation without creating binary")]
 check:
@@ -25,9 +25,13 @@ vet:
 lint:
     golangci-lint run ./...
 
-[doc("Run tests")]
+[doc("Run unit tests (fast; end-to-end tests are skipped)")]
 test:
     go test ./...
+
+[doc("Run the end-to-end suite (builds and executes the CLI)")]
+test-e2e:
+    go test ./... -e2e -count=1
 
 [doc("Run tests with race detection")]
 test-race:
@@ -43,7 +47,7 @@ test-cover:
     set -euo pipefail
     unit=$(mktemp -d); e2e=$(mktemp -d)
     trap 'rm -rf "$unit" "$e2e"' EXIT
-    E2E_COVERDIR="$e2e" go test ./... -cover -args -test.gocoverdir="$unit"
+    E2E_COVERDIR="$e2e" go test ./... -e2e -count=1 -cover -args -test.gocoverdir="$unit"
     go tool covdata percent -i="$unit,$e2e"
 
 [doc("Run tests with coverage and generate HTML report")]
@@ -52,7 +56,7 @@ test-coverage:
     set -euo pipefail
     unit=$(mktemp -d); e2e=$(mktemp -d)
     trap 'rm -rf "$unit" "$e2e"' EXIT
-    E2E_COVERDIR="$e2e" go test ./... -cover -args -test.gocoverdir="$unit"
+    E2E_COVERDIR="$e2e" go test ./... -e2e -count=1 -cover -args -test.gocoverdir="$unit"
     go tool covdata textfmt -i="$unit,$e2e" -o=coverage.out
     go tool cover -html=coverage.out -o coverage.html
     echo "Coverage report: coverage.html"
@@ -63,7 +67,7 @@ test-cover-func:
     set -euo pipefail
     unit=$(mktemp -d); e2e=$(mktemp -d)
     trap 'rm -rf "$unit" "$e2e"' EXIT
-    E2E_COVERDIR="$e2e" go test ./... -cover -args -test.gocoverdir="$unit" >/dev/null
+    E2E_COVERDIR="$e2e" go test ./... -e2e -count=1 -cover -args -test.gocoverdir="$unit" >/dev/null
     go tool covdata func -i="$unit,$e2e" | sort -k2 -n
 
 [doc("Clean build artifacts")]
@@ -86,6 +90,9 @@ deps-update:
 [doc("Download dependencies")]
 deps-download:
     go mod download
+
+[doc("Run every check CI runs, including the end-to-end suite")]
+pre-push: pre-commit test-e2e
 
 [doc("Run a quick development cycle")]
 dev: fmt vet test

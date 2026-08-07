@@ -31,3 +31,6 @@ jobs:
 
     - name: Run pre-commit checks
       run: just pre-commit
+
+    - name: Run end-to-end tests
+      run: just test-e2e
