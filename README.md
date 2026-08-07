@@ -14,6 +14,28 @@ A command-line tool for performing HTTP requests and asserting properties of the
 
 ## Installation
 
+### Download a Release Binary
+
+No Go toolchain required. Static binaries for Linux, macOS and Windows on
+amd64 and arm64 are attached to every [release](https://github.com/korya/http-assert/releases).
+
+```bash
+VERSION=v0.1.0
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+ARCHIVE="http-assert_${VERSION#v}_${OS}_${ARCH}.tar.gz"
+BASE="https://github.com/korya/http-assert/releases/download/$VERSION"
+
+curl -sSLO "$BASE/$ARCHIVE"
+curl -sSLO "$BASE/checksums.txt"
+sha256sum --ignore-missing -c checksums.txt   # macOS: shasum -a 256 -c
+
+tar xzf "$ARCHIVE" http-assert
+```
+
+The binary is statically linked, so it drops straight into a `scratch` or
+`distroless` image with `COPY --from`.
+
 ### From Source
 
 ```bash
@@ -69,6 +91,21 @@ http-assert [flags] <URL>
 | `--verbose` | `-v` | Enable verbose logging |
 | `--silent` | `-s` | Only log errors |
 | `--log-level` | | Set log level (debug, info, warn, error) |
+
+### Other Options
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--version` | | Print the version, commit and build platform, then exit |
+| `--help` | `-h` | Print usage, then exit |
+
+```console
+$ http-assert --version
+http-assert version v0.1.0 (commit 4ffe282, built 2026-08-07T22:24:59Z, go1.25.5, linux/amd64)
+```
+
+A binary built from a checkout rather than a release reports the commit it was
+built from instead of a tag.
 
 ## Examples
 
@@ -226,7 +263,7 @@ Repeating `--maphost` on the command line accumulates as usual.
 
 ### Exit Codes
 
-- `0`: All assertions passed
+- `0`: All assertions passed, or `--version`/`--help` was requested
 - `93`: Failed to perform HTTP request or assertions failed
 - `103`: Invalid command line arguments or other errors
 
