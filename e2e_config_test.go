@@ -245,3 +245,209 @@ func TestE2EConfigEnvSliceSeparator(t *testing.T) {
 		assertExit(t, r, exitOK)
 	})
 }
+
+// The tests below pin value-level semantics that TestE2EConfigContract does not
+// reach. That matrix asks "did this option take effect?" -- a boolean -- so it
+// cannot see how a value was parsed, only that it was. Everything here exists
+// because removing viper (#54) turns on exactly these paths.
+
+// envSupportedCases returns the subset of the matrix whose options read the
+// environment, so the value-level tests stay in step with it automatically.
+func envSupportedCases(t *testing.T) []configCase {
+	t.Helper()
+
+	var out []configCase
+	for _, tc := range configCases(t) {
+		if tc.EnvSupported {
+			out = append(out, tc)
+		}
+	}
+	if len(out) != 6 {
+		t.Fatalf("expected 6 environment-backed options, got %d", len(out))
+	}
+	return out
+}
+
+// TestE2EConfigEnvEmptyMeansUnset pins that an empty variable is ignored rather
+// than parsed. viper's AllowEmptyEnv defaults to false, so HTTP_ASSERT_MAX_TIME=""
+// resolves to the flag default (20) and not to zero.
+//
+// The distinction is mostly invisible from outside -- every option's default
+// happens to coincide with its zero value, and 0 vs 20 seconds cannot be told
+// apart without a 20-second request. What this test does guarantee is that an
+// empty variable never becomes an *error*, which is the regression that would
+// otherwise slip through when unparseable values start being rejected.
+func TestE2EConfigEnvEmptyMeansUnset(t *testing.T) {
+	for _, tc := range envSupportedCases(t) {
+		t.Run(tc.Flag, func(t *testing.T) {
+			r := run(t, map[string]string{tc.EnvKey: ""}, "--assert-ok", url("/ok"))
+			assertExit(t, r, exitOK)
+			assertNotContains(t, r, "Invalid value")
+		})
+	}
+}
+
+// TestE2EConfigEnvInvalidValues pins how an unparseable variable behaves today:
+// viper casts it to the type's zero value and says nothing.
+//
+// The MAX_TIME case is the damaging one. "abc" becomes 0, and a zero
+// http.Client.Timeout means *no timeout at all* -- so a typo silently removes
+// the deadline from a tool whose entire job is enforcing one.
+func TestE2EConfigEnvInvalidValues(t *testing.T) {
+	t.Run("max-time is coerced to zero, disabling the timeout", func(t *testing.T) {
+		characterizes(t, 0, "HTTP_ASSERT_MAX_TIME=abc is accepted as 0; rejection lands next commit")
+
+		r := run(t, map[string]string{"HTTP_ASSERT_MAX_TIME": "abc"}, "--assert-ok", url("/slow"))
+		assertExit(t, r, exitOK)
+		assertNotContains(t, r, "Invalid value")
+	})
+
+	t.Run("insecure is coerced to false", func(t *testing.T) {
+		characterizes(t, 0, "HTTP_ASSERT_INSECURE=garbage is accepted as false")
+
+		r := run(t, map[string]string{"HTTP_ASSERT_INSECURE": "garbage"}, "--assert-ok", tlsSrv.URL)
+		assertExit(t, r, exitRequestFail) // the certificate is still verified
+		assertContains(t, r, "certificate")
+	})
+
+	t.Run("verbose is coerced to false", func(t *testing.T) {
+		characterizes(t, 0, "HTTP_ASSERT_VERBOSE=garbage is accepted as false")
+
+		r := run(t, map[string]string{"HTTP_ASSERT_VERBOSE": "garbage"},
+			"--maphost", "mapped.invalid:80="+hostPort(), "--assert-ok", "http://mapped.invalid/ok")
+		assertExit(t, r, exitOK)
+		assertNotContains(t, r, "HostMappings") // debug logging stayed off
+	})
+
+	// log-level is a string, so the value reaches the flag intact and is
+	// rejected by the level parser rather than by the environment layer. This
+	// case is unaffected by how unparseable values are handled.
+	t.Run("log-level is validated by the level parser", func(t *testing.T) {
+		r := run(t, map[string]string{"HTTP_ASSERT_LOG_LEVEL": "trace"}, "--assert-ok", url("/ok"))
+		assertExit(t, r, exitBadFlagVal)
+		assertContains(t, r, `Invalid value for --log-level flag: "trace"`)
+	})
+
+	// maphost is validated by the mapping parser for the same reason.
+	t.Run("maphost is validated by the mapping parser", func(t *testing.T) {
+		r := run(t, map[string]string{"HTTP_ASSERT_MAPHOST": "garbage"}, "--assert-ok", url("/ok"))
+		assertExit(t, r, exitBadFlagVal)
+		assertContains(t, r, "Invalid value for --maphost flag")
+	})
+}
+
+// TestE2EConfigEnvBooleanForms pins which spellings of true and false are
+// understood. strconv.ParseBool and viper's cast agree on the canonical forms
+// and disagree on "yes"/"on", which viper silently reads as false.
+func TestE2EConfigEnvBooleanForms(t *testing.T) {
+	// Debug logging is observable, so verbose is the probe.
+	base := []string{"--maphost", "mapped.invalid:80=" + hostPort(),
+		"--assert-ok", "http://mapped.invalid/ok"}
+
+	for _, tc := range []struct {
+		Value string
+		On    bool
+	}{
+		{"true", true}, {"1", true}, {"TRUE", true}, {"True", true},
+		{"false", false}, {"0", false}, {"FALSE", false},
+		{"yes", false}, // not a boolean to either implementation
+		{"on", false},
+	} {
+		t.Run(tc.Value, func(t *testing.T) {
+			if tc.Value == "yes" || tc.Value == "on" {
+				characterizes(t, 0, "shell-style booleans are read as false, not rejected")
+			}
+			r := run(t, map[string]string{"HTTP_ASSERT_VERBOSE": tc.Value}, base...)
+			assertExit(t, r, exitOK)
+			if got := strings.Contains(r.Output(), "HostMappings"); got != tc.On {
+				t.Fatalf("HTTP_ASSERT_VERBOSE=%q: verbose=%v, want %v\n%s", tc.Value, got, tc.On, r.Output())
+			}
+		})
+	}
+}
+
+// TestE2EConfigPrecedenceAllOptions extends the precedence guarantee from
+// max-time to every environment-backed option. Each case sets the flag
+// explicitly to the value the environment is trying to override, so a build
+// that resolved the environment first would visibly lose.
+func TestE2EConfigPrecedenceAllOptions(t *testing.T) {
+	mapping := "mapped.invalid:80=" + hostPort()
+	target := "http://mapped.invalid/ok"
+
+	for _, tc := range []struct {
+		Flag  string
+		CLI   []string
+		Env   map[string]string
+		Base  []string
+		Check func(t *testing.T, r result)
+	}{
+		{
+			Flag: "verbose", CLI: []string{"--verbose=false"},
+			Env:   map[string]string{"HTTP_ASSERT_VERBOSE": "true"},
+			Base:  []string{"--maphost", mapping, "--assert-ok", target},
+			Check: func(t *testing.T, r result) { assertNotContains(t, r, "HostMappings") },
+		},
+		{
+			Flag: "silent", CLI: []string{"--silent=false"},
+			Env:   map[string]string{"HTTP_ASSERT_SILENT": "true"},
+			Base:  []string{"--assert-ok", url("/ok")},
+			Check: func(t *testing.T, r result) { assertContains(t, r, "PASSED") },
+		},
+		{
+			Flag: "log-level", CLI: []string{"--log-level", "debug"},
+			Env:   map[string]string{"HTTP_ASSERT_LOG_LEVEL": "error"},
+			Base:  []string{"--maphost", mapping, "--assert-ok", target},
+			Check: func(t *testing.T, r result) { assertContains(t, r, "HostMappings") },
+		},
+		{
+			Flag: "insecure", CLI: []string{"--insecure=false"},
+			Env:   map[string]string{"HTTP_ASSERT_INSECURE": "true"},
+			Base:  []string{"--assert-ok", tlsSrv.URL},
+			Check: func(t *testing.T, r result) { assertContains(t, r, "certificate") },
+		},
+		{
+			Flag: "maphost", CLI: []string{"--maphost", "decoy.invalid:80=127.0.0.1:9"},
+			Env:  map[string]string{"HTTP_ASSERT_MAPHOST": mapping},
+			Base: []string{"--assert-ok", target},
+			// The command-line mapping does not cover mapped.invalid, so the
+			// host must fail to resolve rather than reach the test server.
+			Check: func(t *testing.T, r result) { assertContains(t, r, "failed to send request") },
+		},
+	} {
+		t.Run(tc.Flag, func(t *testing.T) {
+			tc.Check(t, run(t, tc.Env, append(append([]string{}, tc.CLI...), tc.Base...)...))
+		})
+	}
+}
+
+// TestE2EConfigEnvLogLevels pins every level reachable through the environment.
+// TestE2ELogLevels covers the same values on the command line; without this the
+// environment path is only ever exercised at "error".
+func TestE2EConfigEnvLogLevels(t *testing.T) {
+	mapping := "mapped.invalid:80=" + hostPort()
+	target := "http://mapped.invalid/ok"
+
+	for _, tc := range []struct {
+		Level  string
+		Debug  bool // the host-mapping summary is debug-only
+		Result bool // the PASSED line is info and above
+	}{
+		{"debug", true, true},
+		{"info", false, true},
+		{"warn", false, false},
+		{"error", false, false},
+	} {
+		t.Run(tc.Level, func(t *testing.T) {
+			r := run(t, map[string]string{"HTTP_ASSERT_LOG_LEVEL": tc.Level},
+				"--maphost", mapping, "--assert-ok", target)
+			assertExit(t, r, exitOK)
+
+			if got := strings.Contains(r.Output(), "HostMappings"); got != tc.Debug {
+				t.Fatalf("level %q: debug output=%v, want %v", tc.Level, got, tc.Debug)
+			}
+			if got := strings.Contains(r.Output(), "PASSED"); got != tc.Result {
+				t.Fatalf("level %q: result line=%v, want %v", tc.Level, got, tc.Result)
+			}
+		})
+	}
+}
