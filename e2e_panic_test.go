@@ -56,7 +56,10 @@ func cliFlags(t *testing.T) []flagSpec {
 	}
 
 	// e.g. "  -m, --max-time int   Maximum time ..." or "      --assert-ok   Assert ..."
-	line := regexp.MustCompile(`^\s+(?:-[a-zA-Z], )?--([a-z-]+)(?: ([a-zA-Z]+))?\s{2,}`)
+	line, err := regexp.Compile(`^\s+(?:-[a-zA-Z], )?--([a-z-]+)(?: ([a-zA-Z]+))?\s{2,}`)
+	if err != nil {
+		t.Fatalf("bad flag-line pattern: %s", err)
+	}
 
 	var out []flagSpec
 	for _, l := range strings.Split(flagsSection, "\n") {

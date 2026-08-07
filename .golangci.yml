@@ -1,0 +1,15 @@
+version: "2"
+
+# Only additions to the standard linter set; the defaults (errcheck, govet,
+# ineffassign, staticcheck, unused) stay enabled.
+linters:
+  enable:
+    - forbidigo
+  settings:
+    forbidigo:
+      forbid:
+        # regexp.MustCompile panics on a bad pattern. Every pattern in this
+        # program comes from a flag value, so a panic is a crash on user input
+        # rather than a programmer error (#17). Compile and report instead.
+        - pattern: '^regexp\.MustCompile$'
+          msg: "use regexp.Compile and report the error; MustCompile panics on user input (#17)"
