@@ -287,48 +287,62 @@ func TestE2EConfigEnvEmptyMeansUnset(t *testing.T) {
 	}
 }
 
-// TestE2EConfigEnvInvalidValues pins how an unparseable variable behaves today:
-// viper casts it to the type's zero value and says nothing.
+// TestE2EConfigEnvInvalidValues pins that an unparseable variable is rejected.
 //
-// The MAX_TIME case is the damaging one. "abc" becomes 0, and a zero
-// http.Client.Timeout means *no timeout at all* -- so a typo silently removes
-// the deadline from a tool whose entire job is enforcing one.
+// It used to be cast to the type's zero value and applied silently. The
+// MAX_TIME case is why that changed: "abc" became 0, and a zero
+// http.Client.Timeout means no timeout at all, so a typo quietly removed the
+// deadline from a tool whose entire job is enforcing one.
 func TestE2EConfigEnvInvalidValues(t *testing.T) {
-	t.Run("max-time is coerced to zero, disabling the timeout", func(t *testing.T) {
-		characterizes(t, 0, "HTTP_ASSERT_MAX_TIME=abc is accepted as 0; rejection lands next commit")
+	for _, tc := range []struct {
+		Name string
+		Env  map[string]string
+		Args []string
+		Diag string
+	}{
+		{
+			Name: "max-time is not a number",
+			Env:  map[string]string{"HTTP_ASSERT_MAX_TIME": "abc"},
+			Diag: `Invalid value for HTTP_ASSERT_MAX_TIME="abc"`,
+		},
+		{
+			Name: "max-time is a float",
+			Env:  map[string]string{"HTTP_ASSERT_MAX_TIME": "1.5"},
+			Diag: `Invalid value for HTTP_ASSERT_MAX_TIME="1.5"`,
+		},
+		{
+			Name: "insecure is not a boolean",
+			Env:  map[string]string{"HTTP_ASSERT_INSECURE": "garbage"},
+			Diag: `Invalid value for HTTP_ASSERT_INSECURE="garbage"`,
+		},
+		{
+			Name: "verbose is not a boolean",
+			Env:  map[string]string{"HTTP_ASSERT_VERBOSE": "garbage"},
+			Diag: `Invalid value for HTTP_ASSERT_VERBOSE="garbage"`,
+		},
+		{
+			Name: "silent is not a boolean",
+			Env:  map[string]string{"HTTP_ASSERT_SILENT": "maybe"},
+			Diag: `Invalid value for HTTP_ASSERT_SILENT="maybe"`,
+		},
+	} {
+		t.Run(tc.Name, func(t *testing.T) {
+			r := run(t, tc.Env, append(tc.Args, "--assert-ok", url("/ok"))...)
+			assertExit(t, r, exitBadFlagVal)
+			assertContains(t, r, tc.Diag)
+			// The reason is passed through rather than swallowed.
+			assertContains(t, r, "invalid syntax")
+		})
+	}
 
-		r := run(t, map[string]string{"HTTP_ASSERT_MAX_TIME": "abc"}, "--assert-ok", url("/slow"))
-		assertExit(t, r, exitOK)
-		assertNotContains(t, r, "Invalid value")
-	})
-
-	t.Run("insecure is coerced to false", func(t *testing.T) {
-		characterizes(t, 0, "HTTP_ASSERT_INSECURE=garbage is accepted as false")
-
-		r := run(t, map[string]string{"HTTP_ASSERT_INSECURE": "garbage"}, "--assert-ok", tlsSrv.URL)
-		assertExit(t, r, exitRequestFail) // the certificate is still verified
-		assertContains(t, r, "certificate")
-	})
-
-	t.Run("verbose is coerced to false", func(t *testing.T) {
-		characterizes(t, 0, "HTTP_ASSERT_VERBOSE=garbage is accepted as false")
-
-		r := run(t, map[string]string{"HTTP_ASSERT_VERBOSE": "garbage"},
-			"--maphost", "mapped.invalid:80="+hostPort(), "--assert-ok", "http://mapped.invalid/ok")
-		assertExit(t, r, exitOK)
-		assertNotContains(t, r, "HostMappings") // debug logging stayed off
-	})
-
-	// log-level is a string, so the value reaches the flag intact and is
-	// rejected by the level parser rather than by the environment layer. This
-	// case is unaffected by how unparseable values are handled.
+	// log-level and maphost are string-valued, so the environment layer accepts
+	// them and their own parsers reject them. Same exit code, different message.
 	t.Run("log-level is validated by the level parser", func(t *testing.T) {
 		r := run(t, map[string]string{"HTTP_ASSERT_LOG_LEVEL": "trace"}, "--assert-ok", url("/ok"))
 		assertExit(t, r, exitBadFlagVal)
 		assertContains(t, r, `Invalid value for --log-level flag: "trace"`)
 	})
 
-	// maphost is validated by the mapping parser for the same reason.
 	t.Run("maphost is validated by the mapping parser", func(t *testing.T) {
 		r := run(t, map[string]string{"HTTP_ASSERT_MAPHOST": "garbage"}, "--assert-ok", url("/ok"))
 		assertExit(t, r, exitBadFlagVal)
@@ -344,26 +358,36 @@ func TestE2EConfigEnvBooleanForms(t *testing.T) {
 	base := []string{"--maphost", "mapped.invalid:80=" + hostPort(),
 		"--assert-ok", "http://mapped.invalid/ok"}
 
-	for _, tc := range []struct {
-		Value string
-		On    bool
-	}{
-		{"true", true}, {"1", true}, {"TRUE", true}, {"True", true},
-		{"false", false}, {"0", false}, {"FALSE", false},
-		{"yes", false}, // not a boolean to either implementation
-		{"on", false},
-	} {
-		t.Run(tc.Value, func(t *testing.T) {
-			if tc.Value == "yes" || tc.Value == "on" {
-				characterizes(t, 0, "shell-style booleans are read as false, not rejected")
-			}
-			r := run(t, map[string]string{"HTTP_ASSERT_VERBOSE": tc.Value}, base...)
-			assertExit(t, r, exitOK)
-			if got := strings.Contains(r.Output(), "HostMappings"); got != tc.On {
-				t.Fatalf("HTTP_ASSERT_VERBOSE=%q: verbose=%v, want %v\n%s", tc.Value, got, tc.On, r.Output())
-			}
-		})
-	}
+	t.Run("accepted", func(t *testing.T) {
+		for _, tc := range []struct {
+			Value string
+			On    bool
+		}{
+			{"true", true}, {"1", true}, {"TRUE", true}, {"True", true}, {"t", true},
+			{"false", false}, {"0", false}, {"FALSE", false}, {"f", false},
+		} {
+			t.Run(tc.Value, func(t *testing.T) {
+				r := run(t, map[string]string{"HTTP_ASSERT_VERBOSE": tc.Value}, base...)
+				assertExit(t, r, exitOK)
+				if got := strings.Contains(r.Output(), "HostMappings"); got != tc.On {
+					t.Fatalf("HTTP_ASSERT_VERBOSE=%q: verbose=%v, want %v\n%s",
+						tc.Value, got, tc.On, r.Output())
+				}
+			})
+		}
+	})
+
+	// Shell-style spellings are not Go booleans. They used to be read as false,
+	// which meant `HTTP_ASSERT_VERBOSE=yes` quietly turned verbosity off.
+	t.Run("rejected", func(t *testing.T) {
+		for _, v := range []string{"yes", "on", "no", "off", "y", "n"} {
+			t.Run(v, func(t *testing.T) {
+				r := run(t, map[string]string{"HTTP_ASSERT_VERBOSE": v}, base...)
+				assertExit(t, r, exitBadFlagVal)
+				assertContains(t, r, "Invalid value for HTTP_ASSERT_VERBOSE")
+			})
+		}
+	})
 }
 
 // TestE2EConfigPrecedenceAllOptions extends the precedence guarantee from
