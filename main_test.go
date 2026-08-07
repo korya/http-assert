@@ -179,12 +179,19 @@ func Test_parseHostMappings(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.CaseName, func(t *testing.T) {
 			res, err := parseHostMappings(tc.Input)
-			if tc.Error == "" {
-				if !reflect.DeepEqual(res, tc.Output) {
-					t.Errorf("mappings = %#v, want %#v", res, tc.Output)
-				}
-			} else {
-				checkErr(t, "parseHostMappings", err, tc.Error)
+
+			// Both returns are checked in both directions. Previously a success
+			// case ignored err and a failure case ignored res, so a function
+			// returning a mapping *and* an error -- or an error and stale
+			// output -- satisfied every case in this table.
+			checkErr(t, "parseHostMappings", err, tc.Error)
+
+			want := tc.Output
+			if tc.Error != "" {
+				want = nil // nothing is returned alongside an error
+			}
+			if !reflect.DeepEqual(res, want) {
+				t.Errorf("mappings = %#v, want %#v", res, want)
 			}
 		})
 	}
