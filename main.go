@@ -425,16 +425,6 @@ func (c Client) logInfo(format string, args ...interface{}) {
 	c.log(LInfo, format, args...)
 }
 
-//nolint:unused
-func (c Client) logWarn(format string, args ...interface{}) {
-	c.log(LWarn, format, args...)
-}
-
-//nolint:unused
-func (c Client) logError(format string, args ...interface{}) {
-	c.log(LError, format, args...)
-}
-
 func (c Client) log(l LogLevel, format string, args ...interface{}) {
 	if l > c.LogLevel {
 		return

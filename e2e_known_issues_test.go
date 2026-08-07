@@ -231,8 +231,9 @@ func TestKnownIssue34StdoutAlwaysEmpty(t *testing.T) {
 }
 
 // TestKnownIssueWarnLevelIsDead: nothing logs at warn, so --log-level warn is
-// byte-identical to --log-level error. The dead logWarn/logError helpers are
-// silenced with //nolint:unused rather than removed.
+// byte-identical to --log-level error. The unused logWarn/logError helpers have
+// been removed; the LWarn level itself stays, because --log-level warn is part
+// of the documented flag surface.
 func TestKnownIssueWarnLevelIsDead(t *testing.T) {
 	characterizes(t, 0, "--log-level warn behaves exactly like error; nothing logs at warn")
 
