@@ -2,14 +2,11 @@ package main
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
-
-	"github.com/onsi/gomega"
 )
 
 func Test_parseHostMappings(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	t.Parallel()
 
 	testCases := []struct {
@@ -180,18 +177,20 @@ func Test_parseHostMappings(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		res, err := parseHostMappings(tc.Input)
-		if tc.Error == "" {
-			g.Expect(res).To(gomega.Equal(tc.Output), tc.CaseName)
-		} else {
-			g.Expect(err).To(gomega.MatchError(tc.Error), tc.CaseName)
-		}
+		t.Run(tc.CaseName, func(t *testing.T) {
+			res, err := parseHostMappings(tc.Input)
+			if tc.Error == "" {
+				if !reflect.DeepEqual(res, tc.Output) {
+					t.Errorf("mappings = %#v, want %#v", res, tc.Output)
+				}
+			} else {
+				checkErr(t, "parseHostMappings", err, tc.Error)
+			}
+		})
 	}
 }
 
 func TestHostMapping_Matches(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	t.Parallel()
 
 	testCases := []struct {
@@ -219,15 +218,17 @@ func TestHostMapping_Matches(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		caseName := fmt.Sprintf("%q = %q", tc.SrcHost, tc.Input)
-		m := hostMapping{Src: tc.SrcHost}
-		g.Expect(m.Matches(tc.Input)).To(gomega.Equal(tc.Output), caseName)
+		t.Run(fmt.Sprintf("%q matches %q", tc.SrcHost, tc.Input), func(t *testing.T) {
+			m := hostMapping{Src: tc.SrcHost}
+			if got := m.Matches(tc.Input); got != tc.Output {
+				t.Errorf("hostMapping{Src: %q}.Matches(%q) = %v, want %v",
+					tc.SrcHost, tc.Input, got, tc.Output)
+			}
+		})
 	}
 }
 
 func TestHostMapping_DstHost(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	t.Parallel()
 
 	testCases := []struct {
@@ -248,8 +249,12 @@ func TestHostMapping_DstHost(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		caseName := fmt.Sprintf("src=%q dst=%q", tc.SrcHost, tc.DstHost)
-		m := hostMapping{Src: tc.SrcHost, Dst: tc.DstHost}
-		g.Expect(m.DstHost()).To(gomega.Equal(tc.Output), caseName)
+		t.Run(fmt.Sprintf("src=%q dst=%q", tc.SrcHost, tc.DstHost), func(t *testing.T) {
+			m := hostMapping{Src: tc.SrcHost, Dst: tc.DstHost}
+			if got := m.DstHost(); got != tc.Output {
+				t.Errorf("hostMapping{Src: %q, Dst: %q}.DstHost() = %q, want %q",
+					tc.SrcHost, tc.DstHost, got, tc.Output)
+			}
+		})
 	}
 }

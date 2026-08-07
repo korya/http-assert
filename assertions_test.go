@@ -6,13 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/onsi/gomega"
 )
 
 func Test_AssertStatusOK(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	t.Parallel()
 
 	testCases := []struct {
@@ -40,31 +36,27 @@ func Test_AssertStatusOK(t *testing.T) {
 	ok := AssertStatusOK()
 	nok := AssertStatusNOK()
 	for _, tc := range testCases {
-		res := &httpResponse{
-			Response: &http.Response{
-				StatusCode: tc.StatusCode,
-				Status:     tc.Status,
-			},
-		}
+		t.Run(strconv.Itoa(tc.StatusCode), func(t *testing.T) {
+			res := &httpResponse{
+				Response: &http.Response{
+					StatusCode: tc.StatusCode,
+					Status:     tc.Status,
+				},
+			}
 
-		msg := strconv.Itoa(tc.StatusCode)
-		if tc.OK {
-			g.Expect(ok(res)).To(gomega.BeNil(), msg)
-			g.Expect(nok(res)).To(gomega.MatchError(
-				fmt.Sprintf("nok: expected NOK, got %d (%q)", tc.StatusCode, tc.Status),
-			), msg)
-		} else {
-			g.Expect(ok(res)).To(gomega.MatchError(
-				fmt.Sprintf("ok: expected OK, got %d (%q)", tc.StatusCode, tc.Status),
-			), msg)
-			g.Expect(nok(res)).To(gomega.BeNil(), msg)
-		}
+			// Exactly one of the two must hold, so each case checks both.
+			wantOK, wantNOK := "", fmt.Sprintf("nok: expected NOK, got %d (%q)", tc.StatusCode, tc.Status)
+			if !tc.OK {
+				wantOK, wantNOK = fmt.Sprintf("ok: expected OK, got %d (%q)", tc.StatusCode, tc.Status), ""
+			}
+
+			checkErr(t, "ok", ok(res), wantOK)
+			checkErr(t, "nok", nok(res), wantNOK)
+		})
 	}
 }
 
 func Test_AssertStatusEqual(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	t.Parallel()
 
 	testCases := []struct {
@@ -87,41 +79,30 @@ func Test_AssertStatusEqual(t *testing.T) {
 		{914, "Custom Response", false},
 	}
 
-	a1 := AssertStatusEqual(1)
-	a200 := AssertStatusEqual(200)
-	a429 := AssertStatusEqual(429)
+	// 1 is never a real status, so that assertion must always fail; 200 and 429
+	// appear in the table and must pass for their own case only.
+	assertions := map[int]Assertion{1: AssertStatusEqual(1), 200: AssertStatusEqual(200), 429: AssertStatusEqual(429)}
 	for _, tc := range testCases {
-		res := &httpResponse{
-			Response: &http.Response{
-				StatusCode: tc.StatusCode,
-				Status:     tc.Status,
-			},
-		}
+		t.Run(strconv.Itoa(tc.StatusCode), func(t *testing.T) {
+			res := &httpResponse{
+				Response: &http.Response{
+					StatusCode: tc.StatusCode,
+					Status:     tc.Status,
+				},
+			}
 
-		msg := strconv.Itoa(tc.StatusCode)
-		g.Expect(a1(res)).To(gomega.MatchError(
-			fmt.Sprintf("status: expected 1, got %d (%q)", tc.StatusCode, tc.Status),
-		))
-		if tc.StatusCode != 200 {
-			g.Expect(a200(res)).To(gomega.MatchError(
-				fmt.Sprintf("status: expected 200, got %d (%q)", tc.StatusCode, tc.Status),
-			))
-		} else {
-			g.Expect(a200(res)).To(gomega.BeNil(), msg)
-		}
-		if tc.StatusCode != 429 {
-			g.Expect(a429(res)).To(gomega.MatchError(
-				fmt.Sprintf("status: expected 429, got %d (%q)", tc.StatusCode, tc.Status),
-			))
-		} else {
-			g.Expect(a429(res)).To(gomega.BeNil(), msg)
-		}
+			for _, expected := range []int{1, 200, 429} {
+				want := ""
+				if tc.StatusCode != expected {
+					want = fmt.Sprintf("status: expected %d, got %d (%q)", expected, tc.StatusCode, tc.Status)
+				}
+				checkErr(t, fmt.Sprintf("expected %d", expected), assertions[expected](res), want)
+			}
+		})
 	}
 }
 
 func Test_AssertHeader(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	t.Parallel()
 
 	testCases := []struct {
@@ -219,41 +200,30 @@ func Test_AssertHeader(t *testing.T) {
 	equal := AssertHeaderEqual("taRgET", "value")
 	match := AssertHeaderMatch("taRget", `(?i)^val.*$`)
 	for _, tc := range testCases {
-		res := &httpResponse{
-			Response: &http.Response{
-				Header: http.Header(tc.Header),
-			},
-		}
+		t.Run(tc.CaseName, func(t *testing.T) {
+			res := &httpResponse{
+				Response: &http.Response{
+					Header: http.Header(tc.Header),
+				},
+			}
 
-		if !tc.ExpMissing {
-			g.Expect(present(res)).To(gomega.BeNil(), tc.CaseName)
-			g.Expect(missing(res)).To(gomega.MatchError(
-				gomega.MatchRegexp(`header\[taRgEt\]: expected to be missing, got \[.*\]$`),
-			), tc.CaseName)
-		} else {
-			g.Expect(present(res)).To(gomega.MatchError(
-				`header[taRgEt]: expected to be present, missing`,
-			), tc.CaseName)
-			g.Expect(missing(res)).To(gomega.BeNil(), tc.CaseName)
-		}
+			if tc.ExpMissing {
+				checkErr(t, "present", present(res), `header[taRgEt]: expected to be present, missing`)
+				checkErr(t, "missing", missing(res), "")
+			} else {
+				checkErr(t, "present", present(res), "")
+				// The values are echoed back, so match rather than pin them.
+				checkErrMatch(t, "missing", missing(res),
+					`header\[taRgEt\]: expected to be missing, got \[.*\]$`)
+			}
 
-		if tc.ExpEqualError == "" {
-			g.Expect(equal(res)).To(gomega.BeNil(), tc.CaseName)
-		} else {
-			g.Expect(equal(res)).To(gomega.MatchError(tc.ExpEqualError), tc.CaseName)
-		}
-
-		if tc.ExpMatchError == "" {
-			g.Expect(match(res)).To(gomega.BeNil(), tc.CaseName)
-		} else {
-			g.Expect(match(res)).To(gomega.MatchError(tc.ExpMatchError), tc.CaseName)
-		}
+			checkErr(t, "equal", equal(res), tc.ExpEqualError)
+			checkErr(t, "match", match(res), tc.ExpMatchError)
+		})
 	}
 }
 
 func Test_AssertBody(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	t.Parallel()
 
 	testCases := []struct {
@@ -298,31 +268,17 @@ func Test_AssertBody(t *testing.T) {
 	equal := AssertBodyEqual("value")
 	match := AssertBodyMatch(`(?i)^val.*$`)
 	for _, tc := range testCases {
-		res := &httpResponse{BodyBytes: tc.Body}
+		t.Run(tc.CaseName, func(t *testing.T) {
+			res := &httpResponse{BodyBytes: tc.Body}
 
-		if tc.ExpEmptyError == "" {
-			g.Expect(empty(res)).To(gomega.BeNil(), tc.CaseName)
-		} else {
-			g.Expect(empty(res)).To(gomega.MatchError(tc.ExpEmptyError), tc.CaseName)
-		}
-
-		if tc.ExpEqualError == "" {
-			g.Expect(equal(res)).To(gomega.BeNil(), tc.CaseName)
-		} else {
-			g.Expect(equal(res)).To(gomega.MatchError(tc.ExpEqualError), tc.CaseName)
-		}
-
-		if tc.ExpMatchError == "" {
-			g.Expect(match(res)).To(gomega.BeNil(), tc.CaseName)
-		} else {
-			g.Expect(match(res)).To(gomega.MatchError(tc.ExpMatchError), tc.CaseName)
-		}
+			checkErr(t, "empty", empty(res), tc.ExpEmptyError)
+			checkErr(t, "equal", equal(res), tc.ExpEqualError)
+			checkErr(t, "match", match(res), tc.ExpMatchError)
+		})
 	}
 }
 
 func Test_AssertRedirect(t *testing.T) {
-	g := gomega.NewWithT(t)
-
 	t.Parallel()
 
 	testCases := []struct {
@@ -476,24 +432,17 @@ func Test_AssertRedirect(t *testing.T) {
 	equal := AssertRedirectEqual(`https://example.com/`)
 	match := AssertRedirectMatch(`(?i)example\.[a-z]*/$`)
 	for _, tc := range testCases {
-		res := &httpResponse{
-			Response: &http.Response{
-				StatusCode: tc.StatusCode,
-				Status:     strings.Join(strings.Split(strconv.Itoa(tc.StatusCode), ""), "_"),
-				Header:     http.Header(tc.Header),
-			},
-		}
+		t.Run(tc.CaseName, func(t *testing.T) {
+			res := &httpResponse{
+				Response: &http.Response{
+					StatusCode: tc.StatusCode,
+					Status:     strings.Join(strings.Split(strconv.Itoa(tc.StatusCode), ""), "_"),
+					Header:     http.Header(tc.Header),
+				},
+			}
 
-		if tc.ExpEqualError == "" {
-			g.Expect(equal(res)).To(gomega.BeNil(), tc.CaseName)
-		} else {
-			g.Expect(equal(res)).To(gomega.MatchError(tc.ExpEqualError), tc.CaseName)
-		}
-
-		if tc.ExpMatchError == "" {
-			g.Expect(match(res)).To(gomega.BeNil(), tc.CaseName)
-		} else {
-			g.Expect(match(res)).To(gomega.MatchError(tc.ExpMatchError), tc.CaseName)
-		}
+			checkErr(t, "equal", equal(res), tc.ExpEqualError)
+			checkErr(t, "match", match(res), tc.ExpMatchError)
+		})
 	}
 }
