@@ -42,7 +42,7 @@ func main() {
 			}
 			req, err := http.NewRequestWithContext(cmd.Context(), m, args[0], b)
 			if err != nil {
-				die(91, "Cannot create request '%s %s': %s", m, args[0], err)
+				dief(91, "Cannot create request '%s %s': %s", m, args[0], err)
 			}
 
 			vs, _ := cmd.Flags().GetStringArray("header")
@@ -51,7 +51,7 @@ func main() {
 				req.Header.Add(name, value)
 			}
 			if err := c.Do(req, parseAssertionFlags(cmd)...); err != nil {
-				die(93, "Cannot perform request: %s", err)
+				dief(93, "Cannot perform request: %s", err)
 			}
 		},
 	}
@@ -79,7 +79,7 @@ func main() {
 	}
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
-		die(103, "%s", err)
+		dief(103, "%s", err)
 	}
 }
 
@@ -117,12 +117,13 @@ func applyEnv(fs *pflag.FlagSet) {
 		}
 
 		if err := f.Value.Set(v); err != nil {
-			die(71, "Invalid value for %s=%q: %s", key, v, err)
+			dief(71, "Invalid value for %s=%q: %s", key, v, err)
 		}
 	}
 }
 
-func die(rc int, format string, args ...interface{}) {
+// dief formats a message to stderr and terminates the process with rc.
+func dief(rc int, format string, args ...interface{}) {
 	if !strings.HasSuffix(format, "\n") {
 		format += "\n"
 	}
@@ -155,7 +156,7 @@ func mustParseLogLevel(cmd *cobra.Command) LogLevel {
 
 	res, ok := parseLogLevel(levelStr)
 	if !ok {
-		die(71, "Invalid value for --log-level flag: %q", levelStr)
+		dief(71, "Invalid value for --log-level flag: %q", levelStr)
 	}
 
 	return res
@@ -179,7 +180,7 @@ func parseLogLevel(s string) (LogLevel, bool) {
 func mustParseHostMappings(vals []string) []hostMapping {
 	res, err := parseHostMappings(vals)
 	if err != nil {
-		die(71, "Invalid value for --maphost flag: %s", vals)
+		dief(71, "Invalid value for --maphost flag: %s", vals)
 	}
 
 	return res
@@ -236,7 +237,7 @@ func registerAssertionFlags(cmd *cobra.Command) {
 func mustCompileAssertion(flag, pattern string, build func(string) (Assertion, error)) Assertion {
 	a, err := build(pattern)
 	if err != nil {
-		die(71, "Invalid value for %s flag: %s", flag, err)
+		dief(71, "Invalid value for %s flag: %s", flag, err)
 	}
 
 	return a
