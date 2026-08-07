@@ -4,6 +4,8 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,6 +28,10 @@ func TestMain(m *testing.M) {
 		func(w http.ResponseWriter, _ *http.Request) {
 			write(w, http.StatusOK, []byte("secure-ok"), nil)
 		}))
+	// Several tests deliberately connect without --insecure, so the server logs
+	// a rejected handshake every time. That is the expected result, not a
+	// failure; keep it out of the test output.
+	tlsSrv.Config.ErrorLog = log.New(io.Discard, "", 0)
 
 	code := m.Run()
 
