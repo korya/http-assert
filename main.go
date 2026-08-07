@@ -93,6 +93,11 @@ var envFlags = []string{"verbose", "silent", "log-level", "insecure", "max-time"
 
 // applyEnv fills in the options the caller did not pass on the command line.
 // Precedence is command line, then environment, then the flag default.
+//
+// A value that does not parse is rejected rather than coerced. The previous
+// implementation cast it to the type's zero value, which meant a typo in
+// HTTP_ASSERT_MAX_TIME produced a zero http.Client.Timeout -- that is, no
+// timeout at all -- in a tool whose purpose is enforcing one.
 func applyEnv(fs *pflag.FlagSet) {
 	for _, name := range envFlags {
 		f := fs.Lookup(name)
@@ -100,7 +105,8 @@ func applyEnv(fs *pflag.FlagSet) {
 			continue // the command line wins
 		}
 
-		v, ok := os.LookupEnv("HTTP_ASSERT_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")))
+		key := "HTTP_ASSERT_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
+		v, ok := os.LookupEnv(key)
 		if !ok || v == "" {
 			continue // an empty variable counts as unset
 		}
@@ -111,15 +117,7 @@ func applyEnv(fs *pflag.FlagSet) {
 		}
 
 		if err := f.Value.Set(v); err != nil {
-			// An unparseable value becomes the type's zero value rather than an
-			// error. Preserved verbatim from the previous implementation so that
-			// this change is behaviour-preserving; rejected in a later commit.
-			switch f.Value.Type() {
-			case "int":
-				_ = f.Value.Set("0")
-			case "bool":
-				_ = f.Value.Set("false")
-			}
+			die(71, "Invalid value for %s=%q: %s", key, v, err)
 		}
 	}
 }

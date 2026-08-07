@@ -199,7 +199,18 @@ http-assert --assert-ok https://api.example.com
 
 **The remaining options are command-line only.** `--request`, `--header`, `--data` and every `--assert-*` flag ignore the environment; setting `HTTP_ASSERT_REQUEST=POST` has no effect.
 
-**A command-line flag always wins over the environment**, which in turn wins over the built-in default.
+**A command-line flag always wins over the environment**, which in turn wins over the built-in default. An empty variable counts as unset.
+
+**A value that does not parse is rejected** rather than ignored, so a typo cannot silently change behaviour:
+
+```console
+$ HTTP_ASSERT_MAX_TIME=abc http-assert --assert-ok https://api.example.com
+Error: Invalid value for HTTP_ASSERT_MAX_TIME="abc": strconv.ParseInt: parsing "abc": invalid syntax
+$ echo $?
+71
+```
+
+Booleans accept the Go forms (`true`, `false`, `1`, `0`, `t`, `f`, and their capitalisations); shell-style `yes`/`on` are rejected.
 
 **`HTTP_ASSERT_MAPHOST` separates multiple mappings with whitespace, not commas:**
 
