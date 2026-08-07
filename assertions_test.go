@@ -198,7 +198,10 @@ func Test_AssertHeader(t *testing.T) {
 	present := AssertHeaderPresent("taRgEt")
 	missing := AssertHeaderMissing("taRgEt")
 	equal := AssertHeaderEqual("taRgET", "value")
-	match := AssertHeaderMatch("taRget", `(?i)^val.*$`)
+	match, err := AssertHeaderMatch("taRget", `(?i)^val.*$`)
+	if err != nil {
+		t.Fatalf("unexpected error building the assertion: %s", err)
+	}
 	for _, tc := range testCases {
 		t.Run(tc.CaseName, func(t *testing.T) {
 			res := &httpResponse{
@@ -266,7 +269,10 @@ func Test_AssertBody(t *testing.T) {
 
 	empty := AssertBodyEmpty()
 	equal := AssertBodyEqual("value")
-	match := AssertBodyMatch(`(?i)^val.*$`)
+	match, err := AssertBodyMatch(`(?i)^val.*$`)
+	if err != nil {
+		t.Fatalf("unexpected error building the assertion: %s", err)
+	}
 	for _, tc := range testCases {
 		t.Run(tc.CaseName, func(t *testing.T) {
 			res := &httpResponse{BodyBytes: tc.Body}
@@ -430,7 +436,10 @@ func Test_AssertRedirect(t *testing.T) {
 	}
 
 	equal := AssertRedirectEqual(`https://example.com/`)
-	match := AssertRedirectMatch(`(?i)example\.[a-z]*/$`)
+	match, err := AssertRedirectMatch(`(?i)example\.[a-z]*/$`)
+	if err != nil {
+		t.Fatalf("unexpected error building the assertion: %s", err)
+	}
 	for _, tc := range testCases {
 		t.Run(tc.CaseName, func(t *testing.T) {
 			res := &httpResponse{
@@ -443,6 +452,46 @@ func Test_AssertRedirect(t *testing.T) {
 
 			checkErr(t, "equal", equal(res), tc.ExpEqualError)
 			checkErr(t, "match", match(res), tc.ExpMatchError)
+		})
+	}
+}
+
+// Test_AssertMatchConstructorsRejectBadPatterns covers the failure path the
+// pattern-based constructors gained when they stopped panicking (#17).
+func Test_AssertMatchConstructorsRejectBadPatterns(t *testing.T) {
+	t.Parallel()
+
+	constructors := map[string]func(string) (Assertion, error){
+		"AssertBodyMatch":     AssertBodyMatch,
+		"AssertRedirectMatch": AssertRedirectMatch,
+		"AssertHeaderMatch":   func(p string) (Assertion, error) { return AssertHeaderMatch("X-Any", p) },
+	}
+
+	for name, build := range constructors {
+		t.Run(name, func(t *testing.T) {
+			t.Run("unparseable pattern", func(t *testing.T) {
+				a, err := build("[unclosed")
+				if err == nil {
+					t.Fatal("expected an error for an unparseable pattern, got nil")
+				}
+				if a != nil {
+					t.Error("expected a nil Assertion alongside the error")
+				}
+				// The parser's own reason is passed through, not swallowed.
+				if !strings.Contains(err.Error(), "missing closing ]") {
+					t.Errorf("error = %q, want it to explain the syntax problem", err)
+				}
+			})
+
+			t.Run("valid pattern", func(t *testing.T) {
+				a, err := build(`^ok$`)
+				if err != nil {
+					t.Fatalf("unexpected error: %s", err)
+				}
+				if a == nil {
+					t.Fatal("expected an Assertion")
+				}
+			})
 		})
 	}
 }
