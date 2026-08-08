@@ -96,34 +96,53 @@ func TestKnownIssue26MaphostErrorDiscarded(t *testing.T) {
 // #28 was fixed, which is the record of that change.
 func TestIssue28DataImpliesPost(t *testing.T) {
 	for _, tc := range []struct {
-		Name string
-		Args []string
-		Want []string
+		Name    string
+		Args    []string
+		Want    []string
+		NotWant []string
 	}{
 		{
-			"bare -d implies POST and form Content-Type",
-			[]string{"-d", "hello=1"},
-			[]string{`\"method\":\"POST\"`, "application/x-www-form-urlencoded"},
+			Name: "bare -d implies POST and form Content-Type",
+			Args: []string{"-d", "hello=1"},
+			Want: []string{`\"method\":\"POST\"`, `\"body\":\"hello=1\"`,
+				"application/x-www-form-urlencoded"},
 		},
 		{
-			"-X wins over -d",
-			[]string{"-X", "PUT", "-d", "hello=1"},
-			[]string{`\"method\":\"PUT\"`},
+			// The Content-Type follows -d, not the implied method, as in curl.
+			Name: "-X wins over -d, keeping the form Content-Type",
+			Args: []string{"-X", "PUT", "-d", "hello=1"},
+			Want: []string{`\"method\":\"PUT\"`, "application/x-www-form-urlencoded"},
 		},
 		{
-			"explicit -X GET wins even against the default",
-			[]string{"-X", "GET", "-d", "hello=1"},
-			[]string{`\"method\":\"GET\"`},
+			Name: "explicit -X GET wins even against the default",
+			Args: []string{"-X", "GET", "-d", "hello=1"},
+			Want: []string{`\"method\":\"GET\"`},
 		},
 		{
-			"an explicit Content-Type is not replaced",
-			[]string{"-d", "{}", "-H", "Content-Type: application/json"},
-			[]string{`\"method\":\"POST\"`, "application/json"},
+			Name:    "an explicit Content-Type is not replaced",
+			Args:    []string{"-d", "{}", "-H", "Content-Type: application/json"},
+			Want:    []string{`\"method\":\"POST\"`, "application/json"},
+			NotWant: []string{"application/x-www-form-urlencoded"},
 		},
 		{
-			"empty -d still posts, with an empty body",
-			[]string{"-d", ""},
-			[]string{`\"method\":\"POST\"`, `\"body\":\"\"`},
+			Name: "empty -d still posts an empty body, with the form Content-Type",
+			Args: []string{"-d", ""},
+			Want: []string{`\"method\":\"POST\"`, `\"body\":\"\"`,
+				"application/x-www-form-urlencoded"},
+		},
+		{
+			Name:    "without -d nothing changes: GET, no Content-Type",
+			Args:    nil,
+			Want:    []string{`\"method\":\"GET\"`},
+			NotWant: []string{"application/x-www-form-urlencoded"},
+		},
+		{
+			// The suppression idiom from the README: an empty Content-Type
+			// counts as given, so the form default must not overwrite it.
+			Name:    "empty Content-Type header suppresses the default",
+			Args:    []string{"-d", "hello=1", "-H", "Content-Type:"},
+			Want:    []string{`\"method\":\"POST\"`},
+			NotWant: []string{"application/x-www-form-urlencoded"},
 		},
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
@@ -132,15 +151,27 @@ func TestIssue28DataImpliesPost(t *testing.T) {
 			for _, want := range tc.Want {
 				assertContains(t, r, want)
 			}
+			for _, notWant := range tc.NotWant {
+				assertNotContains(t, r, notWant)
+			}
 		})
 	}
 
-	// The suppression idiom from the README: an empty Content-Type counts as
-	// given, so the form default must not overwrite it.
-	t.Run("empty Content-Type header suppresses the default", func(t *testing.T) {
-		r := run(t, nil, "-d", "hello=1", "-H", "Content-Type:",
-			"--assert-body-eq", "never-matches", url("/echo"))
-		assertNotContains(t, r, "application/x-www-form-urlencoded")
+	// The implied POST goes through the same replay machinery as an explicit
+	// one; these mirror the -X POST cases in the redirect and retry suites.
+	t.Run("308 replays the implied method and body", func(t *testing.T) {
+		r := run(t, nil, "-L", "-d", "replayed-payload",
+			"--assert-body", `"body":"replayed-payload".*"method":"POST"`,
+			url("/redirect-308"))
+		assertExit(t, r, exitOK)
+	})
+
+	t.Run("the implied POST body survives a retry", func(t *testing.T) {
+		r := run(t, nil, "--retry", "3", "--retry-delay", "50ms",
+			"-d", "replayed-payload",
+			"--assert-body", `"body":"replayed-payload".*"method":"POST"`,
+			flaky(t, "/flaky-echo", 2))
+		assertExit(t, r, exitOK)
 	})
 }
 
