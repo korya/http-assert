@@ -34,7 +34,7 @@ func TestE2EAssertions(t *testing.T) {
 
 			t.Run("does not hold", func(t *testing.T) {
 				r := run(t, nil, append(append([]string{}, tc.Args...), tc.Fail)...)
-				assertExit(t, r, exitRequestFail)
+				assertExit(t, r, exitAssertFail)
 				assertContains(t, r, tc.Diag)
 			})
 		})
@@ -51,7 +51,7 @@ func TestE2EAssertionAggregation(t *testing.T) {
 		"--assert-body-eq", "not-boom",
 		url("/500"))
 
-	assertExit(t, r, exitRequestFail)
+	assertExit(t, r, exitAssertFail)
 	assertContains(t, r, "4 assertions failed:")
 	for _, want := range []string{"ok: expected OK", "status: expected 200", "header[X-Absent]", "body: expected"} {
 		assertContains(t, r, want)
@@ -69,18 +69,25 @@ func TestE2EExitCodes(t *testing.T) {
 		Diag string
 	}{
 		{Name: "success", Args: []string{"--assert-ok", url("/ok")}, Want: exitOK},
-		{Name: "assertion failed", Args: []string{"--assert-ok", url("/500")}, Want: exitRequestFail, Diag: "assertions failed"},
-		{Name: "connection refused", Args: []string{"--assert-ok", "http://127.0.0.1:9/"}, Want: exitRequestFail, Diag: "failed to send request"},
-		{Name: "dns failure", Args: []string{"--assert-ok", "http://nonexistent.invalid/"}, Want: exitRequestFail, Diag: "failed to send request"},
-		{Name: "unsupported scheme", Args: []string{"--assert-ok", "ftp://example.com/x"}, Want: exitRequestFail, Diag: "unsupported protocol scheme"},
-		{Name: "tls verification", Args: []string{"--assert-ok", tlsSrv.URL}, Want: exitRequestFail, Diag: "certificate"},
-		{Name: "invalid log level", Args: []string{"--log-level", "trace", "--assert-ok", url("/ok")}, Want: exitBadFlagVal, Diag: "Invalid value for --log-level"},
-		{Name: "invalid maphost", Args: []string{"--maphost", "garbage", "--assert-ok", url("/ok")}, Want: exitBadFlagVal, Diag: "Invalid value for --maphost"},
-		{Name: "invalid method", Args: []string{"-X", "BAD METHOD", "--assert-ok", url("/ok")}, Want: exitBadRequest, Diag: "Cannot create request"},
-		{Name: "malformed url", Args: []string{"--assert-ok", "ht!tp://[bad"}, Want: exitBadRequest, Diag: "Cannot create request"},
-		{Name: "no url", Args: []string{"--assert-ok"}, Want: exitUsage, Diag: "accepts 1 arg(s)"},
-		{Name: "too many urls", Args: []string{"--assert-ok", url("/ok"), url("/created")}, Want: exitUsage, Diag: "accepts 1 arg(s)"},
-		{Name: "unknown flag", Args: []string{"--nope", url("/ok")}, Want: exitUsage, Diag: "unknown flag"},
+		{Name: "assertion failed", Args: []string{"--assert-ok", url("/500")}, Want: exitAssertFail, Diag: "assertions failed"},
+		{Name: "connection refused", Args: []string{"--assert-ok", "http://127.0.0.1:9/"}, Want: exitTransportFail, Diag: "failed to send request"},
+		{Name: "dns failure", Args: []string{"--assert-ok", "http://nonexistent.invalid/"}, Want: exitTransportFail, Diag: "failed to send request"},
+		{Name: "unsupported scheme", Args: []string{"--assert-ok", "ftp://example.com/x"}, Want: exitTransportFail, Diag: "unsupported protocol scheme"},
+		{Name: "tls verification", Args: []string{"--assert-ok", tlsSrv.URL}, Want: exitTransportFail, Diag: "certificate"},
+		{Name: "invalid log level", Args: []string{"--log-level", "trace", "--assert-ok", url("/ok")}, Want: exitBadInvocation, Diag: "Invalid value for --log-level"},
+		{Name: "invalid maphost", Args: []string{"--maphost", "garbage", "--assert-ok", url("/ok")}, Want: exitBadInvocation, Diag: "Invalid value for --maphost"},
+		{Name: "invalid method", Args: []string{"-X", "BAD METHOD", "--assert-ok", url("/ok")}, Want: exitBadInvocation, Diag: "Cannot create request"},
+		{Name: "malformed url", Args: []string{"--assert-ok", "ht!tp://[bad"}, Want: exitBadInvocation, Diag: "Cannot create request"},
+		{Name: "no url", Args: []string{"--assert-ok"}, Want: exitBadInvocation, Diag: "accepts 1 arg(s)"},
+		{Name: "too many urls", Args: []string{"--assert-ok", url("/ok"), url("/created")}, Want: exitBadInvocation, Diag: "accepts 1 arg(s)"},
+		{Name: "unknown flag", Args: []string{"--nope", url("/ok")}, Want: exitBadInvocation, Diag: "unknown flag"},
+		// Flipped by #25: detected before any request, so it is an invocation
+		// error, not the transport failure it used to report.
+		{Name: "no assertions", Args: []string{url("/ok")}, Want: exitBadInvocation, Diag: "No assertions specified"},
+		// The same typo through either channel exits the same way; these two
+		// used to differ (103 with a usage dump vs 71 with one line).
+		{Name: "value typo on the command line", Args: []string{"-m", "abc", "--assert-ok", url("/ok")}, Want: exitBadInvocation, Diag: "invalid argument"},
+		{Name: "value typo in the environment", Env: map[string]string{"HTTP_ASSERT_MAX_TIME": "abc"}, Args: []string{"--assert-ok", url("/ok")}, Want: exitBadInvocation, Diag: "Invalid value for HTTP_ASSERT_MAX_TIME"},
 	}
 
 	for _, tc := range cases {
@@ -233,8 +240,10 @@ func TestE2EHostMapping(t *testing.T) {
 	})
 
 	t.Run("unmapped hosts are untouched", func(t *testing.T) {
+		// The unmapped .invalid host fails DNS, so this is a transport
+		// failure: proof the mapping was not applied.
 		r := run(t, nil, "--maphost", "other.invalid:80="+hostPort(), "--assert-ok", target)
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitTransportFail)
 	})
 
 	t.Run("mapping is logged at debug level", func(t *testing.T) {
@@ -292,7 +301,7 @@ func TestE2EHeaderPresenceAssertions(t *testing.T) {
 
 			t.Run("absent", func(t *testing.T) {
 				r := run(t, nil, flag, "X-Api-Version", url("/created"))
-				assertExit(t, r, exitRequestFail)
+				assertExit(t, r, exitAssertFail)
 				assertContains(t, r, "expected to be present")
 			})
 		})
@@ -303,7 +312,7 @@ func TestE2EHeaderPresenceAssertions(t *testing.T) {
 // over 256 bytes are truncated and the hidden byte count is reported.
 func TestE2ELargePayloadCropped(t *testing.T) {
 	r := run(t, nil, "--assert-body-eq", "never-matches", url("/big"))
-	assertExit(t, r, exitRequestFail)
+	assertExit(t, r, exitAssertFail)
 	assertContains(t, r, "Payload is cropped")
 	assertContains(t, r, "4744 bytes are hidden")
 }
@@ -325,14 +334,14 @@ func TestE2EAssertEmptyBody(t *testing.T) {
 	// The inverse still fails, so the fix did not simply stop checking.
 	t.Run("--assert-body-eq '' fails against a body", func(t *testing.T) {
 		r := run(t, nil, "--assert-body-eq", "", url("/ok"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, `body: expected "", got`)
 	})
 
 	// And the wording that the old guard existed to produce is still there.
 	t.Run("an empty body still reports as missing", func(t *testing.T) {
 		r := run(t, nil, "--assert-body-eq", "value", url("/empty"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, `body: expected "value", missing`)
 	})
 }
@@ -349,15 +358,15 @@ func TestE2EAssertBooleanNegation(t *testing.T) {
 	}{
 		// --assert-ok, both directions, both outcomes.
 		{"--assert-ok on a 200", []string{"--assert-ok", url("/ok")}, exitOK},
-		{"--assert-ok on a 500", []string{"--assert-ok", url("/500")}, exitRequestFail},
+		{"--assert-ok on a 500", []string{"--assert-ok", url("/500")}, exitAssertFail},
 		{"--assert-ok=false on a 500", []string{"--assert-ok=false", url("/500")}, exitOK},
-		{"--assert-ok=false on a 200", []string{"--assert-ok=false", url("/ok")}, exitRequestFail},
+		{"--assert-ok=false on a 200", []string{"--assert-ok=false", url("/ok")}, exitAssertFail},
 
 		// --assert-body-empty, the same four.
 		{"--assert-body-empty on a 204", []string{"--assert-body-empty", url("/empty")}, exitOK},
-		{"--assert-body-empty on a body", []string{"--assert-body-empty", url("/ok")}, exitRequestFail},
+		{"--assert-body-empty on a body", []string{"--assert-body-empty", url("/ok")}, exitAssertFail},
 		{"--assert-body-empty=false on a body", []string{"--assert-body-empty=false", url("/ok")}, exitOK},
-		{"--assert-body-empty=false on a 204", []string{"--assert-body-empty=false", url("/empty")}, exitRequestFail},
+		{"--assert-body-empty=false on a 204", []string{"--assert-body-empty=false", url("/empty")}, exitAssertFail},
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
 			assertExit(t, run(t, nil, tc.Args...), tc.Want)
@@ -377,7 +386,7 @@ func TestE2EAssertBooleanNegation(t *testing.T) {
 	// exactly as repeating the positive form is.
 	t.Run("a repeated negation is still refused", func(t *testing.T) {
 		r := run(t, nil, "--assert-ok", "--assert-ok=false", url("/ok"))
-		assertExit(t, r, exitBadFlagVal)
+		assertExit(t, r, exitBadInvocation)
 		assertContains(t, r, "was given 2 times")
 	})
 }
@@ -415,7 +424,7 @@ func TestE2EHeaderRequiresASeparator(t *testing.T) {
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
 			r := run(t, nil, "-H", tc.Arg, "--assert-ok", url("/ok"))
-			assertExit(t, r, exitBadFlagVal)
+			assertExit(t, r, exitBadInvocation)
 			assertContains(t, r, tc.Diag)
 		})
 	}
@@ -428,7 +437,7 @@ func TestE2EHeaderRequiresASeparator(t *testing.T) {
 	// the validation itself is not what lets the single case through.
 	t.Run("an empty value alongside another", func(t *testing.T) {
 		r := run(t, nil, "-H", "X-Ok: 1", "-H", "", "--assert-ok", url("/ok"))
-		assertExit(t, r, exitBadFlagVal)
+		assertExit(t, r, exitBadInvocation)
 		assertContains(t, r, "has no ':' separator")
 	})
 
@@ -482,7 +491,7 @@ func TestE2EBadPatternIsRejected(t *testing.T) {
 		t.Run(tc.Flag, func(t *testing.T) {
 			r := run(t, nil, tc.Flag, tc.Arg, url("/ok"))
 
-			assertExit(t, r, exitBadFlagVal)
+			assertExit(t, r, exitBadInvocation)
 			// The flag at fault is named, and the parser's reason survives.
 			assertContains(t, r, "Invalid value for "+tc.Flag+" flag")
 			assertContains(t, r, "error parsing regexp")

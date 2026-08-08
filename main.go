@@ -30,10 +30,9 @@
 // broken invocation.
 //
 //	0    every assertion passed
-//	71   a flag or environment value was rejected
-//	91   the request could not be constructed from the method and URL
-//	93   the request failed, or at least one assertion did
-//	103  wrong argument count, or an unknown flag
+//	71   the invocation was rejected; no request was attempted
+//	92   the request produced no usable response
+//	93   a response arrived, and at least one assertion failed
 //
 // # Environment
 //
@@ -145,10 +144,9 @@ A query is compiled before the request is made, so a broken one exits 71.
 
 Exit codes:
   0    every assertion passed
-  71   a flag or environment value was rejected
-  91   the request could not be constructed from the method and URL
-  93   the request failed, or at least one assertion did
-  103  wrong argument count, or an unknown flag
+  71   the invocation was rejected; no request was attempted
+  92   the request produced no usable response
+  93   a response arrived, and at least one assertion failed
 
 Environment:
   Six options can also be set as HTTP_ASSERT_<NAME>, with dashes replaced by
@@ -212,6 +210,12 @@ Compression:
   http-assert -L --assert-status 200 https://example.com/old`,
 		Version: versionString(),
 		Args:    cobra.ExactArgs(1),
+		// Errors exit through dief with one line and the invocation code;
+		// cobra's own reporting would add a 40-line usage dump that buries
+		// the error and print it twice. --help is unaffected: cobra renders
+		// help before the silenced error path is reached.
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Run: func(cmd *cobra.Command, args []string) {
 			insecure, _ := cmd.Flags().GetBool("insecure")
 			maxTime, _ := cmd.Flags().GetInt("max-time")
@@ -248,9 +252,15 @@ Compression:
 				d, _ := cmd.Flags().GetString("data")
 				b = strings.NewReader(d)
 			}
+			assertions := parseAssertionFlags(cmd)
+			if len(assertions) == 0 {
+				dief(exitBadInvocation, "No assertions specified; pass at "+
+					"least one --assert-* flag (e.g. --assert-ok)")
+			}
+
 			req, err := http.NewRequestWithContext(cmd.Context(), m, args[0], b)
 			if err != nil {
-				dief(91, "Cannot create request '%s %s': %s", m, args[0], err)
+				dief(exitBadInvocation, "Cannot create request '%s %s': %s", m, args[0], err)
 			}
 
 			vs, _ := cmd.Flags().GetStringArray("header")
@@ -263,8 +273,18 @@ Compression:
 			if dataGiven && len(req.Header.Values("Content-Type")) == 0 {
 				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			}
-			if err := c.Do(req, parseAssertionFlags(cmd)...); err != nil {
-				dief(93, "Cannot perform request: %s", err)
+			if err := c.Do(req, assertions...); err != nil {
+				// An error nobody tagged stays in the transport bucket: wrong
+				// by at most one category, and never reported as a usage
+				// mistake the caller did not make.
+				e := &exitError{code: exitTransportFail}
+				_ = errors.As(err, &e)
+				if e.code == exitAssertFail {
+					// The assertion dump names itself; a transport-flavoured
+					// prefix would send the reader to the network.
+					dief(exitAssertFail, "%s", err)
+				}
+				dief(e.code, "Cannot perform request: %s", err)
 			}
 		},
 	}
@@ -312,7 +332,10 @@ Compression:
 	}
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
-		dief(103, "%s", err)
+		// Arg-count, unknown-flag and unparseable-value errors all land here,
+		// so a typo on the command line and the same typo in the environment
+		// finally exit with the same code.
+		dief(exitBadInvocation, "%s; run 'http-assert --help' for usage", err)
 	}
 }
 
@@ -350,7 +373,7 @@ func applyEnv(fs *pflag.FlagSet) {
 		}
 
 		if err := f.Value.Set(v); err != nil {
-			dief(71, "Invalid value for %s=%q: %s", key, v, err)
+			dief(exitBadInvocation, "Invalid value for %s=%q: %s", key, v, err)
 		}
 	}
 }
@@ -373,7 +396,7 @@ func checkRedirectFlags(fs *pflag.FlagSet) {
 	if follow {
 		for _, name := range []string{"assert-redirect", "assert-redirect-eq"} {
 			if fs.Changed(name) {
-				dief(71, "Flags --location and --%s cannot be used together: "+
+				dief(exitBadInvocation, "Flags --location and --%s cannot be used together: "+
 					"--location follows the redirect, which consumes the 3xx "+
 					"response --%s inspects", name, name)
 			}
@@ -384,11 +407,11 @@ func checkRedirectFlags(fs *pflag.FlagSet) {
 		return
 	}
 	if !follow {
-		dief(71, "Flag --max-redirs bounds a redirect chain that is not being "+
+		dief(exitBadInvocation, "Flag --max-redirs bounds a redirect chain that is not being "+
 			"followed; pass --location, or drop --max-redirs")
 	}
 	if n, _ := fs.GetInt("max-redirs"); n < 0 {
-		dief(71, "Invalid value for --max-redirs flag: %d; it counts redirects, "+
+		dief(exitBadInvocation, "Invalid value for --max-redirs flag: %d; it counts redirects, "+
 			"so the smallest meaningful value is 0", n)
 	}
 }
@@ -406,7 +429,7 @@ func checkRedirectFlags(fs *pflag.FlagSet) {
 // script, and refusing it would break a caller who did nothing wrong.
 func checkRetryFlags(fs *pflag.FlagSet) {
 	if n, _ := fs.GetInt("retry"); n < 0 {
-		dief(71, "Invalid value for --retry flag: %d; it counts retries, so the "+
+		dief(exitBadInvocation, "Invalid value for --retry flag: %d; it counts retries, so the "+
 			"smallest meaningful value is 0", n)
 	}
 
@@ -415,15 +438,40 @@ func checkRetryFlags(fs *pflag.FlagSet) {
 			continue
 		}
 		if !fs.Changed("retry") {
-			dief(71, "Flag --%s configures retrying that is not switched on; "+
+			dief(exitBadInvocation, "Flag --%s configures retrying that is not switched on; "+
 				"pass --retry, or drop --%s", name, name)
 		}
 		if d, _ := fs.GetDuration(name); d < 0 {
-			dief(71, "Invalid value for --%s flag: %s; it is a length of time, "+
+			dief(exitBadInvocation, "Invalid value for --%s flag: %s; it is a length of time, "+
 				"so the smallest meaningful value is 0", name, d)
 		}
 	}
 }
+
+// Exit codes. The code answers whose fault the failure is: the invocation
+// (fix the command line), the transport (no usable response arrived), or the
+// response (it arrived and said the wrong thing).
+//
+// The e2e harness keeps its own copy of these values because it tests the
+// built binary from the outside; the help test keeps both in step with the
+// documentation.
+const (
+	exitOK            = 0
+	exitBadInvocation = 71 // the request was never attempted; fix the command line
+	exitTransportFail = 92 // the request produced no usable response
+	exitAssertFail    = 93 // a response arrived and at least one assertion failed
+)
+
+// exitError carries the exit category from the place a failure is understood
+// -- inside the attempt, where transport and assertion failures are told
+// apart -- to the place the process exits. It survives the retry wrapper
+// because giveUp wraps with %w and errors.As unwraps it.
+type exitError struct {
+	code int
+	msg  string
+}
+
+func (e *exitError) Error() string { return e.msg }
 
 // dief formats a message to stderr and terminates the process with rc.
 func dief(rc int, format string, args ...interface{}) {
@@ -459,7 +507,7 @@ func mustParseLogLevel(cmd *cobra.Command) LogLevel {
 
 	res, ok := parseLogLevel(levelStr)
 	if !ok {
-		dief(71, "Invalid value for --log-level flag: %q", levelStr)
+		dief(exitBadInvocation, "Invalid value for --log-level flag: %q", levelStr)
 	}
 
 	return res
@@ -494,13 +542,13 @@ func parseLogLevel(s string) (LogLevel, bool) {
 // parser is right for one caller and wrong for the other.
 func mustParseRequestHeader(v string) (name, value string) {
 	if !strings.Contains(v, ":") {
-		dief(71, "Invalid value for --header flag: %q has no ':' separator; "+
+		dief(exitBadInvocation, "Invalid value for --header flag: %q has no ':' separator; "+
 			"write %q to send the header with an empty value", v, v+":")
 	}
 
 	name, value = parseHeaderLine(v)
 	if name == "" {
-		dief(71, "Invalid value for --header flag: %q has no header name "+
+		dief(exitBadInvocation, "Invalid value for --header flag: %q has no header name "+
 			"before the ':'", v)
 	}
 
@@ -510,7 +558,7 @@ func mustParseRequestHeader(v string) (name, value string) {
 func mustParseHostMappings(vals []string) []hostMapping {
 	res, err := parseHostMappings(vals)
 	if err != nil {
-		dief(71, "Invalid value for --maphost flag: %s", vals)
+		dief(exitBadInvocation, "Invalid value for --maphost flag: %s", vals)
 	}
 
 	return res
@@ -608,7 +656,7 @@ func rejectRepeats(fs *pflag.FlagSet) {
 func checkRepeats(fs *pflag.FlagSet) {
 	fs.VisitAll(func(f *pflag.Flag) {
 		if v, ok := f.Value.(*singleValue); ok && v.count > 1 {
-			dief(71, "Flag --%s was given %d times but accepts a single value; "+
+			dief(exitBadInvocation, "Flag --%s was given %d times but accepts a single value; "+
 				"repeat --assert-header, --assert-header-eq or --assert-header-missing "+
 				"to make several assertions", f.Name, v.count)
 		}
@@ -624,7 +672,7 @@ func checkRepeats(fs *pflag.FlagSet) {
 func mustCompileAssertion(flag, pattern string, build func(string) (Assertion, error)) Assertion {
 	a, err := build(pattern)
 	if err != nil {
-		dief(71, "Invalid value for %s flag: %s", flag, err)
+		dief(exitBadInvocation, "Invalid value for %s flag: %s", flag, err)
 	}
 
 	return a
@@ -786,8 +834,9 @@ var errTooManyRedirects = errors.New("too many redirects")
 func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 	if len(assertions) == 0 {
 		// Not a failed attempt but a malformed invocation, so it is reported
-		// once rather than retried into the ground.
-		return fmt.Errorf("no assertions defined")
+		// once rather than retried into the ground. The CLI checks this before
+		// calling; the guard backstops any other caller.
+		return &exitError{exitBadInvocation, "no assertions defined"}
 	}
 
 	// Built once rather than per attempt: an http.Transport owns an idle
@@ -840,7 +889,7 @@ func (c Client) doOnce(client *http.Client, req *http.Request, assertions []Asse
 		var b strings.Builder
 		fmt.Fprintf(&b, "failed to rewind the request body:\n- %s\n", err)
 		c.writeHttpDetails(&b, req, nil)
-		return errors.New(b.String())
+		return &exitError{exitTransportFail, b.String()}
 	}
 	req = next
 
@@ -872,7 +921,7 @@ func (c Client) doOnce(client *http.Client, req *http.Request, assertions []Asse
 			c.logInfo("[-] FAILED %s: %s\n", time.Since(startedAt), err)
 		}
 		c.writeHttpDetails(&b, req, nil)
-		return errors.New(b.String())
+		return &exitError{exitTransportFail, b.String()}
 	}
 	defer func() { _ = res.Body.Close() }()
 
@@ -896,7 +945,7 @@ func (c Client) doOnce(client *http.Client, req *http.Request, assertions []Asse
 			fmt.Fprintf(&b, "- %s\n", assertErrors[i])
 		}
 		c.writeHttpDetails(&b, req, httpRes)
-		return errors.New(b.String())
+		return &exitError{exitAssertFail, b.String()}
 	}
 
 	c.logInfo("[+] PASSED %s\n\n", time.Since(startedAt))

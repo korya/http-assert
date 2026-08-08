@@ -47,7 +47,7 @@ actually saw:
 ```console
 $ http-assert --assert-status 200 --assert-jq '.status == "healthy"' https://api.example.com/health
 
-Error: Cannot perform request: 2 assertions failed:
+Error: 2 assertions failed:
 - status: expected 200, got 503 ("503 Service Unavailable")
 - jq[.status == "healthy"]: expected true, got "degraded"
 ```
@@ -128,7 +128,7 @@ go install github.com/korya/http-assert@latest
 http-assert [flags] <URL>
 ```
 
-At least one `--assert-*` flag is required; a run with no assertions exits `93`
+At least one `--assert-*` flag is required; a run with no assertions exits `71`
 rather than reporting a success it never checked.
 
 ### Request Options
@@ -266,7 +266,7 @@ $ http-assert -L --assert-status 200 https://old-domain.com/health
 ```
 
 `--max-redirs` bounds the chain and defaults to 10. `--max-redirs 0` refuses
-every redirect, as in `curl`. Exceeding the bound exits `93` and says so
+every redirect, as in `curl`. Exceeding the bound exits `92` and says so
 explicitly, rather than reporting a network failure that did not happen. The
 option needs `-L` to mean anything, so passing it alone exits `71` rather than
 being quietly ignored.
@@ -318,7 +318,7 @@ at the defaults, over ten minutes. `--retry-max-time` bounds the run instead:
 ```console
 $ http-assert --retry 100 --retry-delay 5s --retry-max-time 30s --assert-ok https://api.example.com/health
 ...
-Error: Cannot perform request: gave up after 6 attempts (--retry-max-time is 30s):
+Error: gave up after 6 attempts (--retry-max-time is 30s):
 ```
 
 The budget is checked before each retry rather than enforced mid-request, as in
@@ -575,11 +575,19 @@ Repeating `--maphost` on the command line accumulates as usual.
 
 ### Exit Codes
 
+The code answers whose fault the failure is — the invocation, the transport,
+or the response:
+
 - `0`: All assertions passed, or `--version`/`--help` was requested
-- `71`: A flag or environment value was rejected
-- `91`: The request could not be constructed from the method and URL
-- `93`: Failed to perform HTTP request, or at least one assertion failed
-- `103`: Wrong argument count, or an unknown flag
+- `71`: The invocation was rejected — a bad flag, value, combination or
+  argument count — and no request was attempted
+- `92`: The request produced no usable response (unreachable host, TLS
+  failure, timeout, redirect bound exceeded)
+- `93`: A response arrived, and at least one assertion failed
+
+Before v0.2 there were five codes: `91` (unbuildable request) and `103`
+(argument/flag syntax) are now `71`, and transport failures moved from `93`
+to `92`, so `93` now always means "the service answered wrongly".
 
 ### Coming from curl
 

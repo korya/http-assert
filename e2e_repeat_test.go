@@ -51,14 +51,14 @@ func TestE2ERepeatedAssertionFlags(t *testing.T) {
 			if accumulates(f.Type) {
 				// Repeating these is the documented way to make several
 				// assertions, so it must not be an error.
-				if r.ExitCode == exitBadFlagVal {
+				if r.ExitCode == exitBadInvocation {
 					t.Fatalf("--%s (%s) rejected a repeat, but repeating it is how you add assertions\n%s",
 						f.Name, f.Type, r.Output())
 				}
 				return
 			}
 
-			assertExit(t, r, exitBadFlagVal)
+			assertExit(t, r, exitBadInvocation)
 			assertContains(t, r, "--"+f.Name+" was given 2 times")
 		})
 	}
@@ -75,6 +75,6 @@ func TestE2ERepeatedAssertionFlags(t *testing.T) {
 func TestE2ERepeatedAssertionKeepsNothingSilently(t *testing.T) {
 	r := run(t, nil, "--assert-status", "500", "--assert-status", "200", url("/ok"))
 
-	assertExit(t, r, exitBadFlagVal)
+	assertExit(t, r, exitBadInvocation)
 	assertNotContains(t, r, "PASSED")
 }

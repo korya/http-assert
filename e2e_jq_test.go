@@ -14,7 +14,7 @@ func TestE2EAssertJQ(t *testing.T) {
 
 	t.Run("a query that does not", func(t *testing.T) {
 		r := run(t, nil, "--assert-jq", `.status == "nope"`, url("/json"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		// The failure names the query, because a run can carry several.
 		assertContains(t, r, `jq[.status == "nope"]: expected true, got false`)
 	})
@@ -56,7 +56,7 @@ func TestE2EAssertJQAccumulates(t *testing.T) {
 			"--assert-jq", `.status == "success"`,
 			"--assert-jq", `.count == 99`,
 			url("/json"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, `jq[.count == 99]`)
 	})
 
@@ -65,7 +65,7 @@ func TestE2EAssertJQAccumulates(t *testing.T) {
 			"--assert-jq", `.count == 99`,
 			"--assert-jq", `.status == "success"`,
 			url("/json"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, `jq[.count == 99]`)
 	})
 
@@ -76,7 +76,7 @@ func TestE2EAssertJQAccumulates(t *testing.T) {
 			"--assert-jq", `.count == 98`,
 			"--assert-jq", `.count == 99`,
 			url("/json"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "2 assertions failed:")
 		assertContains(t, r, `jq[.count == 98]`)
 		assertContains(t, r, `jq[.count == 99]`)
@@ -105,7 +105,7 @@ func TestE2EAssertJQComposes(t *testing.T) {
 			"--assert-body", "never-matches",
 			"--assert-status", "999",
 			url("/json"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "3 assertions failed:")
 		assertContains(t, r, "jq[")
 		assertContains(t, r, "body: expected to match")
@@ -146,7 +146,7 @@ func TestE2EAssertJQRejectsBadQueries(t *testing.T) {
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
 			r := run(t, nil, "--assert-jq", tc.Query, url("/json"))
-			assertExit(t, r, exitBadFlagVal)
+			assertExit(t, r, exitBadInvocation)
 			assertContains(t, r, "Invalid value for --assert-jq flag")
 			assertContains(t, r, tc.Diag)
 		})
@@ -165,27 +165,27 @@ func TestE2EAssertJQRejectsBadQueries(t *testing.T) {
 func TestE2EAssertJQBodyProblems(t *testing.T) {
 	t.Run("a body that is not JSON", func(t *testing.T) {
 		r := run(t, nil, "--assert-jq", `. == 1`, url("/created"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "body: expected JSON")
 	})
 
 	t.Run("an empty body", func(t *testing.T) {
 		r := run(t, nil, "--assert-jq", `. == 1`, url("/empty"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "body: expected JSON")
 	})
 
 	// An encoding nothing can decode reports the encoding, not invalid JSON.
 	t.Run("a body still encoded", func(t *testing.T) {
 		r := run(t, nil, "--assert-jq", `. == 1`, url("/brotli"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "body: response is br-encoded")
 	})
 
 	// A query yielding nothing has checked nothing, so it must not pass.
 	t.Run("a query that matches nothing", func(t *testing.T) {
 		r := run(t, nil, "--assert-jq", `.users[] | select(.id == 99) | .active`, url("/json"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "expected true, got no output")
 	})
 
@@ -193,7 +193,7 @@ func TestE2EAssertJQBodyProblems(t *testing.T) {
 	// what the query actually produced so the reader can see why.
 	t.Run("a query that yields a value rather than a verdict", func(t *testing.T) {
 		r := run(t, nil, "--assert-jq", `.status`, url("/json"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, `expected true, got "success"`)
 	})
 }

@@ -34,7 +34,7 @@ func TestE2ERetryDefaultIsASingleAttempt(t *testing.T) {
 	// One failure is all it takes, and the endpoint would have recovered on the
 	// very next request. Without --retry there is no next request.
 	r := run(t, nil, "--assert-ok", flaky(t, "/flaky", 1))
-	assertExit(t, r, exitRequestFail)
+	assertExit(t, r, exitAssertFail)
 	if n := retries(r); n != 0 {
 		t.Fatalf("retried %d times with --retry unset\n%s", n, r.Output())
 	}
@@ -101,7 +101,7 @@ func TestE2ERetryRecovers(t *testing.T) {
 // reads as a service that was never up, rather than one that never came up.
 func TestE2ERetryExhaustion(t *testing.T) {
 	r := run(t, nil, "--retry", "2", "--retry-delay", "50ms", "--assert-ok", url("/500"))
-	assertExit(t, r, exitRequestFail)
+	assertExit(t, r, exitAssertFail)
 
 	// Two retries is three attempts, not two.
 	assertContains(t, r, "gave up after 3 attempts")
@@ -114,7 +114,7 @@ func TestE2ERetryExhaustion(t *testing.T) {
 
 	t.Run("--retry 0 is the default spelled out", func(t *testing.T) {
 		r := run(t, nil, "--retry", "0", "--assert-ok", url("/500"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertNotContains(t, r, "gave up after")
 		if n := retries(r); n != 0 {
 			t.Fatalf("retried %d times with --retry 0\n%s", n, r.Output())
@@ -129,7 +129,7 @@ func TestE2ERetryMaxTime(t *testing.T) {
 		start := time.Now()
 		r := run(t, nil, "--retry", "1000", "--retry-delay", "100ms",
 			"--retry-max-time", "1s", "--assert-ok", url("/500"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 
 		// Which bound stopped it is the whole reason the message names one.
 		assertContains(t, r, "--retry-max-time is 1s")
@@ -149,7 +149,7 @@ func TestE2ERetryMaxTime(t *testing.T) {
 	t.Run("zero means no budget", func(t *testing.T) {
 		r := run(t, nil, "--retry", "2", "--retry-delay", "50ms",
 			"--retry-max-time", "0", "--assert-ok", url("/500"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "gave up after 3 attempts")
 		assertNotContains(t, r, "--retry-max-time is")
 	})
@@ -158,7 +158,7 @@ func TestE2ERetryMaxTime(t *testing.T) {
 	t.Run("a budget larger than the count is not reported", func(t *testing.T) {
 		r := run(t, nil, "--retry", "1", "--retry-delay", "50ms",
 			"--retry-max-time", "1m", "--assert-ok", url("/500"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "gave up after 2 attempts")
 		assertNotContains(t, r, "--retry-max-time is")
 	})
@@ -172,7 +172,7 @@ func TestE2ERetryMaxTimeIsPerAttempt(t *testing.T) {
 	// on its own clock for the second one to happen at all.
 	r := run(t, nil, "-m", "1", "--retry", "1", "--retry-delay", "50ms",
 		"--assert-ok", url("/slow"))
-	assertExit(t, r, exitRequestFail)
+	assertExit(t, r, exitTransportFail)
 
 	if n := retries(r); n != 1 {
 		t.Fatalf("retried %d times, want 1 -- -m was read as a bound on the run\n%s",
@@ -221,7 +221,7 @@ func TestE2ERetryRejectedCombinations(t *testing.T) {
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
 			r := run(t, nil, tc.Args...)
-			assertExit(t, r, exitBadFlagVal)
+			assertExit(t, r, exitBadInvocation)
 			assertContains(t, r, tc.Diag)
 		})
 	}
@@ -238,7 +238,7 @@ func TestE2ERetryRejectedCombinations(t *testing.T) {
 	// rejected by the flag parser rather than guessed at.
 	t.Run("a delay without a unit is refused", func(t *testing.T) {
 		r := run(t, nil, "--retry", "1", "--retry-delay", "5", "--assert-ok", url("/ok"))
-		assertExit(t, r, exitUsage)
+		assertExit(t, r, exitBadInvocation)
 		assertContains(t, r, `missing unit in duration "5"`)
 	})
 }

@@ -20,7 +20,7 @@ func TestE2EFailureDump(t *testing.T) {
 	// placeholder down to "  <<".
 	t.Run("omitted placeholder is not cut to the body length", func(t *testing.T) {
 		r := run(t, nil, "-s", "--assert-ok", url("/500"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "  << Payload is omitted >>")
 	})
 
@@ -28,7 +28,7 @@ func TestE2EFailureDump(t *testing.T) {
 	// else, from a dumper whose entire purpose is showing the bytes.
 	t.Run("binary body keeps its hex dump and ascii gutter", func(t *testing.T) {
 		r := run(t, nil, "--assert-body-eq", "never-matches", url("/binary"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "00000000")
 		assertContains(t, r, "00 01 02 03 ff fe 07 08")
 		assertContains(t, r, "|")
@@ -39,7 +39,7 @@ func TestE2EFailureDump(t *testing.T) {
 	// zero terminator, plus a Transfer-Encoding header it invented.
 	t.Run("chunked response is dumped without transfer framing", func(t *testing.T) {
 		r := run(t, nil, "-v", "--assert-body-eq", "never-matches", url("/chunked"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "first chunk second chunk")
 		assertNotContains(t, r, "Transfer-Encoding")
 
@@ -58,7 +58,7 @@ func TestE2EFailureDump(t *testing.T) {
 	// -- pretty-printed JSON, HTML, a log excerpt -- was shown as a hex dump.
 	t.Run("multi-line text body is shown as text", func(t *testing.T) {
 		r := run(t, nil, "--assert-body-eq", "never-matches", url("/multiline"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "\"status\": \"success\"")
 		assertNotContains(t, r, "00000000")
 	})
@@ -67,7 +67,7 @@ func TestE2EFailureDump(t *testing.T) {
 	// survive the change.
 	t.Run("large body is still cropped and says so", func(t *testing.T) {
 		r := run(t, nil, "--assert-body-eq", "never-matches", url("/big"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "Payload is cropped")
 		assertContains(t, r, "bytes are hidden")
 	})
@@ -76,7 +76,7 @@ func TestE2EFailureDump(t *testing.T) {
 	// some CI log viewers.
 	t.Run("dump uses newlines rather than wire line endings", func(t *testing.T) {
 		r := run(t, nil, "-s", "--assert-ok", url("/500"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 
 		// The request half is still serialized by http.Request.Write and keeps
 		// its CRLFs; #19 replaces it. Only the response half is checked here.
