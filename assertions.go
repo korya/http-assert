@@ -104,10 +104,31 @@ func AssertHeaderMatch(name, expPattern string) (Assertion, error) {
 	}, nil
 }
 
+// bodyOf returns the payload, or an error saying why there is none to assert
+// against.
+//
+// Every body assertion goes through it. Matching against bytes that are still
+// compressed produced a false failure with an unexplained hex dump -- and, with
+// a loose enough pattern, a false pass, which is the one outcome this program
+// exists to refuse (#27).
+func bodyOf(res *httpResponse) ([]byte, error) {
+	if res.DecodeErr != nil {
+		return nil, fmt.Errorf("body: response is %s-encoded and was not decoded: %s",
+			res.Encoding, res.DecodeErr)
+	}
+
+	return res.BodyBytes, nil
+}
+
 func AssertBodyEmpty() Assertion {
 	return func(res *httpResponse) error {
-		if len(res.BodyBytes) > 0 {
-			return fmt.Errorf("body: expected to be empty, got %q", string(res.BodyBytes))
+		body, err := bodyOf(res)
+		if err != nil {
+			return err
+		}
+
+		if len(body) > 0 {
+			return fmt.Errorf("body: expected to be empty, got %q", string(body))
 		}
 
 		return nil
@@ -116,11 +137,16 @@ func AssertBodyEmpty() Assertion {
 
 func AssertBodyEqual(expContent string) Assertion {
 	return func(res *httpResponse) error {
-		if len(res.BodyBytes) == 0 {
+		body, err := bodyOf(res)
+		if err != nil {
+			return err
+		}
+
+		if len(body) == 0 {
 			return fmt.Errorf("body: expected %q, missing", expContent)
 		}
 
-		if c := string(res.BodyBytes); expContent != c {
+		if c := string(body); expContent != c {
 			return fmt.Errorf("body: expected %q, got %q", expContent, c)
 		}
 
@@ -135,11 +161,16 @@ func AssertBodyMatch(expPattern string) (Assertion, error) {
 	}
 
 	return func(res *httpResponse) error {
-		if len(res.BodyBytes) == 0 {
+		body, err := bodyOf(res)
+		if err != nil {
+			return err
+		}
+
+		if len(body) == 0 {
 			return fmt.Errorf("body: expected to match %q, missing", expPattern)
 		}
 
-		if c := string(res.BodyBytes); !re.MatchString(c) {
+		if c := string(body); !re.MatchString(c) {
 			return fmt.Errorf("body: expected to match %q, got %q", expPattern, c)
 		}
 

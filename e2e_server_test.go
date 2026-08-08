@@ -1,7 +1,9 @@
 package main_test
 
 import (
+	"compress/flate"
 	"compress/gzip"
+	"compress/zlib"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -210,19 +212,65 @@ func testHandler() http.Handler {
 		write(w, http.StatusOK, []byte("slow"), nil)
 	})
 
-	// Compresses only when the client asked, so the suite can exercise both the
-	// transparent-decompression path and the caller-set-the-header path.
+	// The endpoints below exist for #27. Compression is the one transformation
+	// that sits between the bytes on the wire and what an assertion reads, so
+	// each way of applying it gets an endpoint.
+
+	// Compresses only when the client asked. Since the CLI no longer advertises
+	// gzip on its own, this answers plain unless -H says otherwise.
 	mux.HandleFunc("/gzip", func(w http.ResponseWriter, r *http.Request) {
 		raw := []byte(`{"status":"success"}`)
 		if !acceptsGzip(r) {
 			write(w, http.StatusOK, raw, nil)
 			return
 		}
-		w.Header().Set("Content-Encoding", "gzip")
+		writeGzip(w, raw)
+	})
+
+	// Compresses whether or not the client asked, as a CDN with compression
+	// forced on does. Nothing the caller passes can avoid the encoding here.
+	mux.HandleFunc("/gzip-always", func(w http.ResponseWriter, _ *http.Request) {
+		writeGzip(w, []byte(`{"status":"success"}`))
+	})
+
+	// deflate is two formats under one name: RFC 9110 says zlib, and plenty of
+	// servers send raw. Both are served so the guessing can be tested.
+	mux.HandleFunc("/deflate", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Encoding", "deflate")
 		w.WriteHeader(http.StatusOK)
-		zw := gzip.NewWriter(w)
-		_, _ = zw.Write(raw)
+		zw, _ := flate.NewWriter(w, flate.DefaultCompression)
+		_, _ = zw.Write([]byte(`{"status":"success"}`))
 		_ = zw.Close()
+	})
+
+	mux.HandleFunc("/deflate-zlib", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Encoding", "deflate")
+		w.WriteHeader(http.StatusOK)
+		zw := zlib.NewWriter(w)
+		_, _ = zw.Write([]byte(`{"status":"success"}`))
+		_ = zw.Close()
+	})
+
+	// An encoding with no decoder here. Brotli is the realistic case; the bytes
+	// are not real brotli because nothing in the suite could produce them, and
+	// the CLI never gets far enough to care.
+	mux.HandleFunc("/brotli", func(w http.ResponseWriter, _ *http.Request) {
+		write(w, http.StatusOK, []byte{0x1b, 0x13, 0x00, 0x00, 0xa4, 0xb0, 0xb2},
+			http.Header{"Content-Encoding": {"br"}})
+	})
+
+	// Claims an encoding and then does not apply it, which is what a corrupt or
+	// truncated stream looks like from here.
+	mux.HandleFunc("/gzip-corrupt", func(w http.ResponseWriter, _ *http.Request) {
+		write(w, http.StatusOK, []byte(`{"status":"success"}`),
+			http.Header{"Content-Encoding": {"gzip"}})
+	})
+
+	// 204 with an encoding header and no body at all. There is nothing to
+	// decode, so --assert-body-empty must still pass.
+	mux.HandleFunc("/empty-gzip", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	// Reflects the request so tests can observe -X, -H and -d taking effect.
@@ -273,6 +321,14 @@ func failCount(r *http.Request) int64 {
 		return math.MaxInt64
 	}
 	return n
+}
+
+func writeGzip(w http.ResponseWriter, raw []byte) {
+	w.Header().Set("Content-Encoding", "gzip")
+	w.WriteHeader(http.StatusOK)
+	zw := gzip.NewWriter(w)
+	_, _ = zw.Write(raw)
+	_ = zw.Close()
 }
 
 func acceptsGzip(r *http.Request) bool {
