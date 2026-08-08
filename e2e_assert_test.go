@@ -221,3 +221,32 @@ func TestE2ELargePayloadCropped(t *testing.T) {
 	assertContains(t, r, "Payload is cropped")
 	assertContains(t, r, "4744 bytes are hidden")
 }
+
+// TestE2EAssertEmptyBody covers the expectations an empty body satisfies.
+//
+// They were unreachable until #22: both --assert-body-eq and --assert-body
+// checked whether the body was empty before checking what was asked of it, so
+// a 204 could not be asserted to have the body a 204 is defined to have.
+func TestE2EAssertEmptyBody(t *testing.T) {
+	t.Run("--assert-body-eq '' passes against a 204", func(t *testing.T) {
+		assertExit(t, run(t, nil, "--assert-body-eq", "", url("/empty")), exitOK)
+	})
+
+	t.Run("--assert-body '^$' passes against a 204", func(t *testing.T) {
+		assertExit(t, run(t, nil, "--assert-body", "^$", url("/empty")), exitOK)
+	})
+
+	// The inverse still fails, so the fix did not simply stop checking.
+	t.Run("--assert-body-eq '' fails against a body", func(t *testing.T) {
+		r := run(t, nil, "--assert-body-eq", "", url("/ok"))
+		assertExit(t, r, exitRequestFail)
+		assertContains(t, r, `body: expected "", got`)
+	})
+
+	// And the wording that the old guard existed to produce is still there.
+	t.Run("an empty body still reports as missing", func(t *testing.T) {
+		r := run(t, nil, "--assert-body-eq", "value", url("/empty"))
+		assertExit(t, r, exitRequestFail)
+		assertContains(t, r, `body: expected "value", missing`)
+	})
+}

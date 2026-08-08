@@ -142,11 +142,15 @@ func AssertBodyEqual(expContent string) Assertion {
 			return err
 		}
 
-		if len(body) == 0 {
-			return fmt.Errorf("body: expected %q, missing", expContent)
-		}
-
 		if c := string(body); expContent != c {
+			// "missing" reads better than `got ""` for the common case of an
+			// empty body where content was expected, but it is a wording
+			// choice inside the failure -- deciding the verdict on it is what
+			// made --assert-body-eq '' impossible to satisfy (#22).
+			if len(body) == 0 {
+				return fmt.Errorf("body: expected %q, missing", expContent)
+			}
+
 			return fmt.Errorf("body: expected %q, got %q", expContent, c)
 		}
 
@@ -166,11 +170,14 @@ func AssertBodyMatch(expPattern string) (Assertion, error) {
 			return err
 		}
 
-		if len(body) == 0 {
-			return fmt.Errorf("body: expected to match %q, missing", expPattern)
-		}
-
 		if c := string(body); !re.MatchString(c) {
+			// As above: an empty body is a legitimate subject for a pattern.
+			// `^$`, `.*` and `\A\z` all match it, and none of them could pass
+			// while emptiness was checked before the pattern was.
+			if len(body) == 0 {
+				return fmt.Errorf("body: expected to match %q, missing", expPattern)
+			}
+
 			return fmt.Errorf("body: expected to match %q, got %q", expPattern, c)
 		}
 

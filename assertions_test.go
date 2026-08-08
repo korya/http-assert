@@ -284,6 +284,57 @@ func Test_AssertBody(t *testing.T) {
 	}
 }
 
+// Test_AssertBody_emptyIsAssertable covers the expectations that an empty body
+// satisfies. They were unreachable while emptiness was checked before the
+// comparison: the guard existed to word the failure nicely and ended up
+// deciding it (#22).
+func Test_AssertBody_emptyIsAssertable(t *testing.T) {
+	t.Parallel()
+
+	// Patterns an empty body legitimately matches. `.*` is the one a user is
+	// most likely to reach for, `^$` the one they mean.
+	patterns := []string{"^$", ".*", `\A\z`, ""}
+
+	t.Run("equal to the empty string", func(t *testing.T) {
+		res := &httpResponse{BodyBytes: []byte{}}
+		checkErr(t, "equal", AssertBodyEqual("")(res), "")
+
+		// And a nil body, which is what a 204 produces.
+		checkErr(t, "equal, nil body", AssertBodyEqual("")(&httpResponse{}), "")
+	})
+
+	for _, p := range patterns {
+		t.Run("matching "+strconv.Quote(p), func(t *testing.T) {
+			a, err := AssertBodyMatch(p)
+			if err != nil {
+				t.Fatalf("cannot build the assertion: %s", err)
+			}
+
+			checkErr(t, "match", a(&httpResponse{BodyBytes: []byte{}}), "")
+			checkErr(t, "match, nil body", a(&httpResponse{}), "")
+		})
+	}
+
+	// The verdict moved; the wording did not. A body that is empty when
+	// something was expected still reads as "missing" rather than `got ""`.
+	t.Run("an empty body still reports as missing", func(t *testing.T) {
+		res := &httpResponse{BodyBytes: []byte{}}
+		checkErr(t, "equal", AssertBodyEqual("value")(res), `body: expected "value", missing`)
+
+		a, err := AssertBodyMatch("^value$")
+		if err != nil {
+			t.Fatalf("cannot build the assertion: %s", err)
+		}
+		checkErr(t, "match", a(res), `body: expected to match "^value$", missing`)
+	})
+
+	// The inverse must keep failing: a non-empty body is not the empty string.
+	t.Run("a non-empty body does not equal the empty string", func(t *testing.T) {
+		res := &httpResponse{BodyBytes: []byte("x")}
+		checkErr(t, "equal", AssertBodyEqual("")(res), `body: expected "", got "x"`)
+	})
+}
+
 func Test_AssertRedirect(t *testing.T) {
 	t.Parallel()
 
