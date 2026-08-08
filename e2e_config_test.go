@@ -15,7 +15,7 @@ import (
 // the two sources is covered separately by TestE2EConfigPrecedence.
 //
 // EnvSupported records what the tool does *today*, not what it should do. Only
-// 6 of the 24 options honour the environment; the other 18 silently ignore it
+// 6 of the 25 options honour the environment; the other 19 silently ignore it
 // (#54 proposes making this uniform). When that lands, flip those booleans --
 // the diff is the proof the change did what it claimed.
 
@@ -180,6 +180,7 @@ func configCases(t *testing.T) []configCase {
 		assertion("assert-body-empty", []string{"--assert-body-empty"}, "HTTP_ASSERT_ASSERT_BODY_EMPTY", url("/empty")),
 		assertion("assert-redirect", []string{"--assert-redirect", `https://.*\.com/.*`}, "HTTP_ASSERT_ASSERT_REDIRECT", url("/redirect")),
 		assertion("assert-redirect-eq", []string{"--assert-redirect-eq", "https://new-domain.com/path"}, "HTTP_ASSERT_ASSERT_REDIRECT_EQ", url("/redirect")),
+		assertion("assert-jq", []string{"--assert-jq", `.status == "success"`}, "HTTP_ASSERT_ASSERT_JQ", url("/json")),
 	}
 }
 
@@ -187,7 +188,7 @@ func TestE2EConfigContract(t *testing.T) {
 	cases := configCases(t)
 
 	// Guards against an option being added to the CLI and quietly skipped here.
-	if got, want := len(cases), 24; got != want {
+	if got, want := len(cases), 25; got != want {
 		t.Fatalf("config matrix covers %d options, want %d -- add the new flag to configCases", got, want)
 	}
 
@@ -210,7 +211,7 @@ func TestE2EConfigContract(t *testing.T) {
 			t.Run("env", func(t *testing.T) {
 				if !tc.EnvSupported {
 					characterizes(t, tc.Issue,
-						tc.EnvKey+" is ignored; only 6 of 24 options read the environment")
+						tc.EnvKey+" is ignored; only 6 of 25 options read the environment")
 				}
 				r := run(t, map[string]string{tc.EnvKey: tc.EnvVal}, tc.Base...)
 				if got := tc.Applied(r); got != tc.EnvSupported {

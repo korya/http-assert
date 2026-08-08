@@ -90,6 +90,7 @@ A `-H` value needs a colon. A bare name exits `71` rather than being sent as a h
 | `--assert-body` | Assert body matches regex pattern |
 | `--assert-body-eq` | Assert body equals exact value |
 | `--assert-body-empty` | Assert body is empty |
+| `--assert-jq` | Assert a jq expression yields `true` (can be used multiple times) |
 | `--assert-redirect` | Assert redirect location matches regex |
 | `--assert-redirect-eq` | Assert redirect location equals exact value |
 
@@ -106,6 +107,57 @@ http-assert --assert-body-empty=false https://api.example.com/report
 ```
 
 The three body assertions run against the decoded payload, never the bytes on the wire — see [Compression](#compression).
+
+### JSON Assertions
+
+`--assert-jq` runs a [jq](https://jqlang.github.io/jq/) expression against the
+response body and passes when it yields `true`:
+
+```bash
+http-assert --assert-jq '.status == "success"' https://api.example.com/health
+```
+
+**Prefer it over `--assert-body` for JSON.** A regex works on the serialized
+text, so it breaks when the server adds a space, reorders keys or escapes a
+character -- none of which change what the response means:
+
+```bash
+# breaks on {"status": "success"}
+http-assert --assert-body '"status":"success"' https://api.example.com/
+
+# does not care how the JSON is formatted
+http-assert --assert-jq '.status == "success"' https://api.example.com/
+```
+
+**Repeat it to assert several things**, alongside any other assertion. Every
+failure is reported, not just the first:
+
+```bash
+http-assert \
+  --assert-jq '.status == "success"' \
+  --assert-jq '.users | length > 0' \
+  --assert-jq '[.users[].active] | all' \
+  --assert-status 200 \
+  https://api.example.com/users
+```
+
+The expression yields the verdict itself rather than a path and an expected
+value, so jq's types, comparisons, `select`, `length` and `test()` are all
+available and there is no separate syntax to learn. An expression that works in
+`jq` works here.
+
+Three things to know:
+
+- **A query that yields no output fails.** `.users[] | select(.id == 99) | .active`
+  produces nothing when no user has that id, and passing would mean reporting
+  success for a check that examined nothing.
+- **A query must yield `true`, not a value.** `--assert-jq '.status'` fails with
+  `expected true, got "success"`. Write the comparison.
+- **A broken expression exits `71` before the request is made**, so a typo is
+  never mistaken for a service answering wrongly.
+
+A body that is not JSON, is empty, or is still compressed fails the assertion
+saying which, rather than blaming the expression.
 
 ### Redirects
 
@@ -314,7 +366,7 @@ http-assert -X POST \
 http-assert \
   --assert-ok \
   --assert-header-eq "Content-Type: application/json" \
-  --assert-body "\"status\":\"success\"" \
+  --assert-jq '.status == "success"' \
   https://api.example.com/status
 ```
 
