@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -123,4 +124,124 @@ func Test_writeTo_ignoresTransportFraming(t *testing.T) {
 			t.Errorf("writeTo() leaked %q into the dump:\n%s", unwanted, b.String())
 		}
 	}
+}
+
+// Test_writeRequest covers the request half of the failure dump.
+//
+// http.Request.Write was used directly, and by then the transport had drained
+// the body -- so the dump advertised a Content-Length with nothing behind it,
+// which is both useless (the first question after a failed POST is what was
+// sent) and self-contradictory as an HTTP message (#19).
+func Test_writeRequest(t *testing.T) {
+	t.Parallel()
+
+	request := func(t *testing.T, method, body string) *http.Request {
+		t.Helper()
+
+		var r io.Reader = http.NoBody
+		if body != "" {
+			r = strings.NewReader(body)
+		}
+		req, err := http.NewRequest(method, "http://example.com/things", r)
+		if err != nil {
+			t.Fatalf("cannot build the request: %s", err)
+		}
+		return req
+	}
+
+	// sent drains the body the way http.Client does, so the request under test
+	// is in the state the dump actually receives.
+	sent := func(t *testing.T, req *http.Request) *http.Request {
+		t.Helper()
+
+		attempt, err := cloneForAttempt(req)
+		if err != nil {
+			t.Fatalf("cannot clone: %s", err)
+		}
+		if _, err := io.ReadAll(attempt.Body); err != nil {
+			t.Fatalf("cannot drain: %s", err)
+		}
+		_ = attempt.Body.Close()
+		return attempt
+	}
+
+	t.Run("the body survives having been sent", func(t *testing.T) {
+		req := sent(t, request(t, "POST", "PAYLOAD"))
+
+		var b strings.Builder
+		writeRequest(&b, req)
+
+		out := b.String()
+		if !strings.Contains(out, "PAYLOAD") {
+			t.Errorf("the dump omits the body it says it sent:\n%s", out)
+		}
+		if !strings.Contains(out, "Content-Length: 7") {
+			t.Errorf("the dump lost Content-Length:\n%s", out)
+		}
+	})
+
+	t.Run("a request with no body dumps cleanly", func(t *testing.T) {
+		req := sent(t, request(t, "GET", ""))
+
+		var b strings.Builder
+		writeRequest(&b, req)
+
+		out := b.String()
+		if !strings.Contains(out, "GET /things HTTP/1.1") {
+			t.Errorf("the request line is missing:\n%s", out)
+		}
+		// No payload section, and nothing pretending there is one.
+		if strings.Contains(out, "Payload is cropped") {
+			t.Errorf("an empty body was reported as cropped:\n%s", out)
+		}
+	})
+
+	// The other half of #18's lesson, which was applied to the response and
+	// not to the request: a wire-format serializer puts the whole payload in
+	// the report, however long it is.
+	t.Run("a long body is cropped", func(t *testing.T) {
+		body := strings.Repeat("x", maxPayloadBytes+44)
+		req := sent(t, request(t, "POST", body))
+
+		var b strings.Builder
+		writeRequest(&b, req)
+
+		out := b.String()
+		if !strings.Contains(out, "<< Payload is cropped: 44 bytes are hidden >>") {
+			t.Errorf("a %d-byte body was not cropped:\n%s", len(body), out)
+		}
+		// Counted in the body only -- the Host header carries an "x" of its own.
+		_, payload, found := strings.Cut(out, "\r\n\r\n")
+		if !found {
+			t.Fatalf("no header/body separator in the dump:\n%s", out)
+		}
+		if n := strings.Count(payload, "x"); n != maxPayloadBytes {
+			t.Errorf("%d body bytes reached the dump, want %d", n, maxPayloadBytes)
+		}
+	})
+
+	t.Run("a non-printable body is hex-dumped", func(t *testing.T) {
+		req := sent(t, request(t, "POST", "\xff\xfe\x07\x08"))
+
+		var b strings.Builder
+		writeRequest(&b, req)
+
+		if out := b.String(); !strings.Contains(out, "ff fe 07 08") {
+			t.Errorf("a binary body was not hex-dumped:\n%s", out)
+		}
+	})
+
+	// Without GetBody there is nothing to replay. The dump must still render
+	// the headers rather than failing outright.
+	t.Run("a body that cannot be replayed still dumps its headers", func(t *testing.T) {
+		req := sent(t, request(t, "POST", "PAYLOAD"))
+		req.GetBody = nil
+
+		var b strings.Builder
+		writeRequest(&b, req)
+
+		if out := b.String(); !strings.Contains(out, "POST /things HTTP/1.1") {
+			t.Errorf("the headers went missing along with the body:\n%s", out)
+		}
+	})
 }
