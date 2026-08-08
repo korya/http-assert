@@ -21,18 +21,21 @@ func TestE2EHelpDocumentsTheContract(t *testing.T) {
 	assertExit(t, r, exitOK)
 
 	t.Run("every exit code the CLI can return is listed", func(t *testing.T) {
-		for _, code := range []int{exitOK, exitBadFlagVal, exitBadRequest, exitRequestFail, exitUsage} {
+		for _, code := range []int{exitOK, exitBadInvocation, exitTransportFail, exitAssertFail} {
 			if !strings.Contains(r.Output(), fmt.Sprintf("\n  %d ", code)) {
 				t.Errorf("--help does not document exit code %d", code)
 			}
 		}
 	})
 
-	// Exit 2 was the Go panic path. #61 removed it and TestE2ENoFlagPanics
-	// keeps it removed, so it is deliberately absent rather than overlooked.
-	t.Run("the panic exit code is not advertised", func(t *testing.T) {
-		if strings.Contains(r.Output(), "\n  2 ") {
-			t.Error("--help documents exit code 2, which the CLI can no longer return")
+	// Exit 2 was the Go panic path (#61); 91 and 103 merged into the
+	// invocation code when the categories shrank to three. All are
+	// deliberately absent rather than overlooked.
+	t.Run("retired exit codes are not advertised", func(t *testing.T) {
+		for _, code := range []int{2, 91, 103} {
+			if strings.Contains(r.Output(), fmt.Sprintf("\n  %d ", code)) {
+				t.Errorf("--help documents exit code %d, which the CLI can no longer return", code)
+			}
 		}
 	})
 

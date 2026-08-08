@@ -22,7 +22,7 @@ func TestE2ERedirectDefaultIsNotToFollow(t *testing.T) {
 
 	t.Run("the destination is never fetched", func(t *testing.T) {
 		r := run(t, nil, "--assert-body-eq", "arrived", url("/hop?n=1"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 	})
 }
 
@@ -82,7 +82,7 @@ func TestE2ERedirectHopLimit(t *testing.T) {
 
 	t.Run("N+1 hops is refused", func(t *testing.T) {
 		r := run(t, nil, "-L", "--max-redirs", "2", "--assert-ok", url("/hop?n=3"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitTransportFail)
 		// Reported as this program stopping the chain, not as the network
 		// failing -- the reader would otherwise go looking for a broken host.
 		assertContains(t, r, "redirect chain was not followed to the end")
@@ -94,7 +94,7 @@ func TestE2ERedirectHopLimit(t *testing.T) {
 	// the >= net/http uses: zero has to refuse the first hop, not permit it.
 	t.Run("zero refuses every redirect", func(t *testing.T) {
 		r := run(t, nil, "-L", "--max-redirs", "0", "--assert-ok", url("/hop?n=1"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitTransportFail)
 		assertContains(t, r, "redirect chain was not followed to the end")
 	})
 
@@ -102,14 +102,14 @@ func TestE2ERedirectHopLimit(t *testing.T) {
 		assertExit(t, run(t, nil, "-L", "--assert-body-eq", "arrived", url("/hop?n=10")), exitOK)
 
 		r := run(t, nil, "-L", "--assert-ok", url("/hop?n=11"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitTransportFail)
 		assertContains(t, r, "--max-redirs is 10")
 	})
 
 	// Nothing else terminates this one.
 	t.Run("a redirect loop ends at the limit", func(t *testing.T) {
 		r := run(t, nil, "-L", "--assert-ok", url("/redirect-loop"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitTransportFail)
 		assertContains(t, r, "redirect chain was not followed to the end")
 	})
 }
@@ -146,7 +146,7 @@ func TestE2ERedirectRejectedCombinations(t *testing.T) {
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
 			r := run(t, nil, tc.Args...)
-			assertExit(t, r, exitBadFlagVal)
+			assertExit(t, r, exitBadInvocation)
 			assertContains(t, r, tc.Diag)
 		})
 	}
@@ -163,7 +163,7 @@ func TestE2ERedirectRejectedCombinations(t *testing.T) {
 // else. Without the extra line the two read as a single exchange.
 func TestE2ERedirectFailureDumpNamesTheDestination(t *testing.T) {
 	r := run(t, nil, "-L", "--assert-status", "999", url("/redirect-local"))
-	assertExit(t, r, exitRequestFail)
+	assertExit(t, r, exitAssertFail)
 
 	assertContains(t, r, "FAILED: GET "+url("/redirect-local"))
 	assertContains(t, r, "Followed to: GET "+url("/ok"))
