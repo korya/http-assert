@@ -84,7 +84,7 @@ func TestE2ECompressionNoFalsePass(t *testing.T) {
 	// now fail, because the compressed form is not what gets asserted on.
 	bad := run(t, nil, "-H", "Accept-Encoding: gzip",
 		"--assert-body", `\x1f\x8b`, url("/gzip"))
-	assertExit(t, bad, exitRequestFail)
+	assertExit(t, bad, exitAssertFail)
 }
 
 // TestE2ECompressionHeadersSurvive pins the half of the fix that is not about
@@ -106,7 +106,7 @@ func TestE2ECompressionHeadersSurvive(t *testing.T) {
 	t.Run("nothing is advertised unless asked", func(t *testing.T) {
 		r := run(t, nil, "--assert-body", `"headers"`,
 			"--assert-body-eq", "never-matches", url("/echo"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertNotContains(t, r, "Accept-Encoding")
 	})
 }
@@ -128,7 +128,7 @@ func TestE2ECompressionUndecodable(t *testing.T) {
 
 	t.Run("a body check refuses, and names the encoding", func(t *testing.T) {
 		r := run(t, nil, "--assert-body", `"status":"success"`, url("/brotli"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "body: response is br-encoded and was not decoded")
 		assertContains(t, r, "no decoder for \"br\"")
 		// The old failure was a bare hex dump with nothing explaining it.
@@ -139,7 +139,7 @@ func TestE2ECompressionUndecodable(t *testing.T) {
 	// bytes as plain would be its own silent corruption.
 	t.Run("a body that does not match its stated encoding", func(t *testing.T) {
 		r := run(t, nil, "--assert-body-eq", `{"status":"success"}`, url("/gzip-corrupt"))
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitAssertFail)
 		assertContains(t, r, "body: response is gzip-encoded and was not decoded")
 	})
 }
@@ -150,7 +150,7 @@ func TestE2ECompressionUndecodable(t *testing.T) {
 func TestE2ECompressionFailureDumpExplainsItself(t *testing.T) {
 	r := run(t, nil, "-H", "Accept-Encoding: gzip",
 		"--assert-body-eq", "never-matches", url("/gzip"))
-	assertExit(t, r, exitRequestFail)
+	assertExit(t, r, exitAssertFail)
 
 	assertContains(t, r, "Content-Encoding: gzip")
 	assertContains(t, r, "<< Payload decoded from gzip >>")

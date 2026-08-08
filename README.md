@@ -193,7 +193,7 @@ $ http-assert -L --assert-status 200 https://old-domain.com/health
 ```
 
 `--max-redirs` bounds the chain and defaults to 10. `--max-redirs 0` refuses
-every redirect, as in `curl`. Exceeding the bound exits `93` and says so
+every redirect, as in `curl`. Exceeding the bound exits `92` and says so
 explicitly, rather than reporting a network failure that did not happen. The
 option needs `-L` to mean anything, so passing it alone exits `71` rather than
 being quietly ignored.
@@ -523,11 +523,19 @@ Repeating `--maphost` on the command line accumulates as usual.
 
 ### Exit Codes
 
+The code answers whose fault the failure is — the invocation, the transport,
+or the response:
+
 - `0`: All assertions passed, or `--version`/`--help` was requested
-- `71`: A flag or environment value was rejected
-- `91`: The request could not be constructed from the method and URL
-- `93`: Failed to perform HTTP request, or at least one assertion failed
-- `103`: Wrong argument count, or an unknown flag
+- `71`: The invocation was rejected — a bad flag, value, combination or
+  argument count — and no request was attempted
+- `92`: The request produced no usable response (unreachable host, TLS
+  failure, timeout, redirect bound exceeded)
+- `93`: A response arrived, and at least one assertion failed
+
+Before v0.2 there were five codes: `91` (unbuildable request) and `103`
+(argument/flag syntax) are now `71`, and transport failures moved from `93`
+to `92`, so `93` now always means "the service answered wrongly".
 
 ## Use Cases
 
