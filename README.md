@@ -165,8 +165,8 @@ $ http-assert --retry 5 --retry-delay 1s --assert-ok https://api.example.com/hea
 
 **Any failure is retried** -- an unreachable host and a wrong answer alike. The
 case this exists for is waiting for a service to come up, and there the response
-usually arrives perfectly well and says the wrong thing, so retrying only
-transport errors would miss the point. `curl` draws the line differently.
+usually arrives perfectly well and says the wrong thing, so retrying only the
+connection failures would miss the point. `curl` draws the line differently.
 
 **The delay is fixed, not exponential.** `--retry 30 --retry-delay 1s` reads as
 "poll once a second for half a minute", and the worst case can be worked out
@@ -193,10 +193,10 @@ that never came up.
 
 Two combinations are refused with exit `71` rather than quietly ignored:
 `--retry-delay` or `--retry-max-time` without `--retry` (a value nobody will
-read), and a negative value for any of the three -- `pflag` accepts
-`--retry-delay=-2s` without complaint, and it would turn the pause between
-attempts into no pause at all. `--retry 0` is legal and means "make the request
-once", so `--retry ${RETRIES:-0} --retry-delay 1s` works.
+read), and a negative value for any of the three. `--retry-delay=-2s` is a
+well-formed duration but would turn the pause between attempts into no pause at
+all, so it is refused rather than obeyed. `--retry 0` is legal and means "make
+the request once", so `--retry ${RETRIES:-0} --retry-delay 1s` works.
 
 Note that the durations take a unit: `--retry-delay 5` is rejected, `5s` is not.
 
@@ -227,10 +227,10 @@ http-assert \
   https://api.example.com/
 ```
 
-**Nothing is advertised in `Accept-Encoding` unless you ask for it.** `curl` and
-Go's HTTP client both add the header on your behalf; this does not, so a server
-that compresses only on request will answer in plain. Ask with `-H` when you
-want to exercise content negotiation.
+**Nothing is advertised in `Accept-Encoding` unless you ask for it.** `curl`
+sends the header on your behalf; this does not, so a server that compresses only
+on request will answer in plain. Ask with `-H` when you want to exercise content
+negotiation.
 
 **An encoding with no decoder here fails only the body assertions**, naming
 itself, and leaves the rest of the run intact:
@@ -243,10 +243,9 @@ $ http-assert --assert-ok https://cdn.example.com/
 [+] PASSED 38ms
 ```
 
-Brotli and zstd are the encodings this covers in practice. Neither has a
-decoder in the Go standard library, and a health-check tool is not worth a
-dependency for it -- so a status check keeps working while a body assertion
-says plainly that it cannot run.
+Brotli (`br`) and zstd are the encodings this covers in practice. Neither is
+supported yet: [#77](https://github.com/korya/http-assert/issues/77) tracks
+brotli and [#78](https://github.com/korya/http-assert/issues/78) tracks zstd.
 
 A header that claims an encoding the body does not have is treated the same
 way. Reading those bytes as plain text would be its own silent corruption.
@@ -431,7 +430,7 @@ http-assert --assert-ok https://api.example.com
 
 #### Proxies
 
-`HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are honoured for the request itself, through Go's standard proxy resolution. There is no flag for them, and no way to disable the behaviour from the command line — if one of these is set in your environment for unrelated reasons, requests go through it.
+`HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are honoured for the request itself. There is no flag for them, and no way to disable the behaviour from the command line — if one of these is set in your environment for unrelated reasons, requests go through it.
 
 **A value that does not parse is rejected** rather than ignored, so a typo cannot silently change behaviour:
 
