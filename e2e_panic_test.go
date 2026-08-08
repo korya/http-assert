@@ -40,6 +40,7 @@ var hostileValues = []string{
 // flagSpec is one flag as advertised by --help.
 type flagSpec struct {
 	Name     string // long name, without dashes
+	Type     string // the value type --help prints, empty for a boolean
 	TakesArg bool   // whether --help shows a value type after it
 }
 
@@ -67,7 +68,7 @@ func cliFlags(t *testing.T) []flagSpec {
 		if m == nil || m[1] == "help" {
 			continue
 		}
-		out = append(out, flagSpec{Name: m[1], TakesArg: m[2] != ""})
+		out = append(out, flagSpec{Name: m[1], Type: m[2], TakesArg: m[2] != ""})
 	}
 
 	// Guards against a --help format change turning this into a no-op that
