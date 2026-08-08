@@ -130,22 +130,6 @@ func TestKnownIssue31MaxTimeAcceptsNonPositive(t *testing.T) {
 	}
 }
 
-// TestKnownIssue32NegatedBooleanFlagsDiffer: --assert-ok=false registers the
-// inverse assertion; --assert-body-empty=false registers nothing.
-func TestKnownIssue32NegatedBooleanFlagsDiffer(t *testing.T) {
-	t.Run("assert-ok=false asserts NOT ok", func(t *testing.T) {
-		characterizes(t, 32, "an undocumented negation that happens to be useful")
-		assertExit(t, run(t, nil, "--assert-ok=false", url("/500")), exitOK)
-	})
-
-	t.Run("assert-body-empty=false registers nothing", func(t *testing.T) {
-		characterizes(t, 32, "the same syntax on a sibling flag is a no-op")
-		r := run(t, nil, "--assert-body-empty=false", url("/ok"))
-		assertExit(t, r, exitRequestFail)
-		assertContains(t, r, "no assertions defined")
-	})
-}
-
 // TestKnownIssue33BareHeaderSendsEmptyValue: a -H value with no colon parses to
 // an empty value and is sent as an empty-valued header.
 //

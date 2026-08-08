@@ -10,6 +10,9 @@
 // once. Every other assertion flag takes a single value and is rejected if
 // given twice, rather than quietly keeping the last one.
 //
+// The two boolean assertions negate with =false, which selects the opposite
+// assertion rather than cancelling the flag.
+//
 //	http-assert --assert-ok https://example.com
 //	http-assert --assert-status 201 -X POST -d '{"n":1}' https://api.example.com/things
 //	http-assert --assert-header 'Content-Type: application/json' \
@@ -123,6 +126,11 @@ against all of them, and every failure is reported, not just the first.
 Repeat --assert-header, --assert-header-eq or --assert-header-missing to make
 several assertions of that kind. Every other assertion flag takes a single
 value and is rejected if given twice, rather than quietly keeping the last.
+
+The two boolean assertions can be negated with =false, which selects the
+opposite assertion rather than cancelling the flag: --assert-ok=false asserts
+the status IS an error, and --assert-body-empty=false asserts the body is not
+empty.
 
 Exit codes:
   0    every assertion passed
@@ -491,11 +499,12 @@ func registerAssertionFlags(cmd *cobra.Command) {
 	cmd.Flags().StringArray("assert-header-missing", nil, "Assert header is missing")
 	cmd.Flags().String("assert-body", "", "Assert body matches the provided regexp")
 	cmd.Flags().String("assert-body-eq", "", "Assert body equals the provided value")
-	cmd.Flags().Bool("assert-body-empty", false, "Assert body is empty")
+	cmd.Flags().Bool("assert-body-empty", false,
+		"Assert body is empty; =false asserts it is not")
 
 	// Common shorthands
 	cmd.Flags().Bool("assert-ok", false,
-		"Assert response status is not an error (2xx or 3xx)")
+		"Assert response status is not an error (2xx or 3xx); =false asserts it is")
 	cmd.Flags().String("assert-redirect", "",
 		"Assert redirect location matches the provided regexp; redirects are not followed")
 	cmd.Flags().String("assert-redirect-eq", "",
@@ -566,16 +575,36 @@ func mustCompileAssertion(flag, pattern string, build func(string) (Assertion, e
 	return a
 }
 
+// boolAssertion turns a boolean assertion flag into the assertion it asks for.
+//
+// A boolean assertion has two of them, and =false selects the second rather
+// than cancelling the flag: --assert-ok asserts the status is not an error,
+// --assert-ok=false asserts that it is. Naming an assertion and getting no
+// assertion would be the one outcome worth refusing, and it is what
+// --assert-body-empty=false used to do -- the run died with "no assertions
+// defined" after the user had named one (#32).
+//
+// The pairing lives here, once, rather than being written out per flag. The two
+// flags drifted apart because nothing connected them; a helper is what connects
+// them, in the same way rejectRepeats derives from the flag's type rather than
+// from a list.
+func boolAssertion(cmd *cobra.Command, name string, whenTrue, whenFalse func() Assertion) []Assertion {
+	if !cmd.Flags().Changed(name) {
+		return nil
+	}
+
+	if v, _ := cmd.Flags().GetBool(name); v {
+		return []Assertion{whenTrue()}
+	}
+
+	return []Assertion{whenFalse()}
+}
+
 func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 	var res []Assertion
 
-	if cmd.Flags().Changed("assert-ok") {
-		if v, _ := cmd.Flags().GetBool("assert-ok"); v {
-			res = append(res, AssertStatusOK())
-		} else {
-			res = append(res, AssertStatusNOK())
-		}
-	}
+	res = append(res, boolAssertion(cmd, "assert-ok", AssertStatusOK, AssertStatusNOK)...)
+	res = append(res, boolAssertion(cmd, "assert-body-empty", AssertBodyEmpty, AssertBodyNotEmpty)...)
 
 	if cmd.Flags().Changed("assert-redirect") {
 		v, _ := cmd.Flags().GetString("assert-redirect")
@@ -614,10 +643,6 @@ func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 		v, _ := cmd.Flags().GetString("assert-body-eq")
 		res = append(res, AssertBodyEqual(v))
 	}
-	if v, _ := cmd.Flags().GetBool("assert-body-empty"); v {
-		res = append(res, AssertBodyEmpty())
-	}
-
 	return res
 }
 

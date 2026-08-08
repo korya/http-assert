@@ -507,6 +507,56 @@ func Test_AssertRedirect(t *testing.T) {
 	}
 }
 
+// Test_AssertBodyNotEmpty is the assertion --assert-body-empty=false selects.
+// It had no constructor at all, which is why that flag registered nothing (#32).
+func Test_AssertBodyNotEmpty(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		Name string
+		Body []byte
+		Want string
+	}{
+		{Name: "a body satisfies it", Body: []byte("x")},
+		{
+			Name: "an empty body does not",
+			Body: []byte{},
+			Want: "body: expected to be non-empty, got nothing",
+		},
+		{
+			// What a 204 produces. It must fail the same way an empty slice
+			// does, not differently.
+			Name: "a nil body does not",
+			Want: "body: expected to be non-empty, got nothing",
+		},
+		{
+			// Whitespace is content. The assertion is about presence, not
+			// meaning, and trimming here would make it about both.
+			Name: "whitespace counts as a body",
+			Body: []byte(" "),
+		},
+	}
+
+	a := AssertBodyNotEmpty()
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			checkErr(t, "not-empty", a(&httpResponse{BodyBytes: tc.Body}), tc.Want)
+		})
+	}
+
+	// The pair must be exact opposites on every input, or =false means
+	// something subtly other than "not that".
+	t.Run("it is the exact inverse of AssertBodyEmpty", func(t *testing.T) {
+		empty := AssertBodyEmpty()
+		for _, body := range [][]byte{nil, {}, []byte(" "), []byte("x"), []byte("longer body")} {
+			res := &httpResponse{BodyBytes: body}
+			if (empty(res) == nil) == (a(res) == nil) {
+				t.Errorf("both agree on %q; they must disagree", string(body))
+			}
+		}
+	})
+}
+
 // Test_AssertMatchConstructorsRejectBadPatterns covers the failure path the
 // pattern-based constructors gained when they stopped panicking (#17).
 func Test_AssertMatchConstructorsRejectBadPatterns(t *testing.T) {

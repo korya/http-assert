@@ -135,6 +135,21 @@ func AssertBodyEmpty() Assertion {
 	}
 }
 
+func AssertBodyNotEmpty() Assertion {
+	return func(res *httpResponse) error {
+		body, err := bodyOf(res)
+		if err != nil {
+			return err
+		}
+
+		if len(body) == 0 {
+			return fmt.Errorf("body: expected to be non-empty, got nothing")
+		}
+
+		return nil
+	}
+}
+
 func AssertBodyEqual(expContent string) Assertion {
 	return func(res *httpResponse) error {
 		body, err := bodyOf(res)
