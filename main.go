@@ -154,8 +154,12 @@ Environment:
 	cmd.Flags().StringP("data", "d", "",
 		"Sends the specified data in a POST request to the HTTP server")
 	registerAssertionFlags(cmd)
+	rejectRepeats(cmd.Flags())
 
 	cmd.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
+		// Before applyEnv, so that a value the environment supplies can never
+		// be mistaken for a second occurrence on the command line.
+		checkRepeats(cmd.Flags())
 		applyEnv(cmd.Flags())
 	}
 
@@ -312,6 +316,55 @@ func registerAssertionFlags(cmd *cobra.Command) {
 		"Assert redirect location matches the provided regexp")
 	cmd.Flags().String("assert-redirect-eq", "",
 		"Assert redirect location equals the provided URL")
+}
+
+// singleValue wraps a flag that holds one value, counting how many times the
+// parser assigned to it.
+//
+// pflag records only whether a flag was set, never how often, so a second
+// occurrence of a scalar flag overwrites the first and leaves nothing behind
+// to notice. For an assertion that means the run goes green having checked
+// less than it was asked to (#35). The count is the missing evidence.
+type singleValue struct {
+	inner pflag.Value
+	count int
+}
+
+func (v *singleValue) Set(s string) error { v.count++; return v.inner.Set(s) }
+func (v *singleValue) String() string     { return v.inner.String() }
+func (v *singleValue) Type() string       { return v.inner.Type() }
+
+// collects reports whether a flag type accumulates its values rather than
+// replacing them. Repeating those is how you ask for several assertions.
+func collects(flagType string) bool {
+	return strings.HasSuffix(flagType, "Array") || strings.HasSuffix(flagType, "Slice")
+}
+
+// rejectRepeats prepares every single-valued assertion flag to notice a repeat.
+//
+// Derived from the flag's own type rather than a list, because a list is how
+// this went wrong in the first place: --assert-header was made repeatable and
+// the others were not, and nothing connected the two decisions. An assertion
+// flag added later is covered the day it is added.
+func rejectRepeats(fs *pflag.FlagSet) {
+	fs.VisitAll(func(f *pflag.Flag) {
+		if strings.HasPrefix(f.Name, "assert-") && !collects(f.Value.Type()) {
+			f.Value = &singleValue{inner: f.Value}
+		}
+	})
+}
+
+// checkRepeats terminates when an assertion was named more than once. Taking
+// the last value silently is the one outcome worth refusing: the alternative
+// is a tool that reports success for a check it never ran.
+func checkRepeats(fs *pflag.FlagSet) {
+	fs.VisitAll(func(f *pflag.Flag) {
+		if v, ok := f.Value.(*singleValue); ok && v.count > 1 {
+			dief(71, "Flag --%s was given %d times but accepts a single value; "+
+				"repeat --assert-header, --assert-header-eq or --assert-header-missing "+
+				"to make several assertions", f.Name, v.count)
+		}
+	})
 }
 
 // mustCompileAssertion builds a pattern-based assertion, reporting an
