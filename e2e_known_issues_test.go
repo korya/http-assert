@@ -121,22 +121,6 @@ func TestKnownIssue26MaphostErrorDiscarded(t *testing.T) {
 	assertNotContains(t, r, "has no separator")
 }
 
-// TestKnownIssue27GzipBreaksBodyAssertions: setting Accept-Encoding by hand
-// disables Go's transparent decompression, so assertions see compressed bytes.
-func TestKnownIssue27GzipBreaksBodyAssertions(t *testing.T) {
-	t.Run("transparent decompression by default", func(t *testing.T) {
-		assertExit(t, run(t, nil, "--assert-body", `"status":"success"`, url("/gzip")), exitOK)
-	})
-
-	t.Run("caller-set Accept-Encoding breaks it", func(t *testing.T) {
-		characterizes(t, 27, "body assertions run against gzip bytes, with no warning")
-
-		r := run(t, nil, "-H", "Accept-Encoding: gzip", "--assert-body", `"status":"success"`, url("/gzip"))
-		assertExit(t, r, exitRequestFail)
-		assertContains(t, r, "Content-Encoding: gzip")
-	})
-}
-
 // TestKnownIssue28DataDoesNotImplyPost: curl switches to POST for -d; this does not.
 func TestKnownIssue28DataDoesNotImplyPost(t *testing.T) {
 	characterizes(t, 28, "-d keeps the GET method its help text says it changes")

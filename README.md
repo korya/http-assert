@@ -91,6 +91,8 @@ http-assert [flags] <URL>
 
 The three header flags can be repeated to make several assertions of that kind. Every other assertion flag takes a single value; giving one twice exits `71` rather than silently keeping the last.
 
+The three body assertions run against the decoded payload, never the bytes on the wire — see [Compression](#compression).
+
 ### Redirects
 
 Redirects are not followed by default. A 3xx is delivered to the assertions
@@ -197,6 +199,57 @@ attempts into no pause at all. `--retry 0` is legal and means "make the request
 once", so `--retry ${RETRIES:-0} --retry-delay 1s` works.
 
 Note that the durations take a unit: `--retry-delay 5` is rejected, `5s` is not.
+
+### Compression
+
+A compressed body is decoded before the assertions run, so the body assertions
+always see the payload:
+
+```console
+$ http-assert -H 'Accept-Encoding: gzip' --assert-body '"status":"success"' https://api.example.com/
+[.] HTTP/1.1 GET https://api.example.com/
+[:] HTTP/1.1 200 OK
+[+] PASSED 41ms
+```
+
+`gzip` and `deflate` are understood, the latter in both the zlib form the RFC
+specifies and the raw form much of the web actually sends.
+
+**The response headers are reported exactly as they arrived.** Nothing is
+deleted on the way, so a run can assert on the body *and* on how it was
+encoded:
+
+```bash
+http-assert \
+  -H 'Accept-Encoding: gzip' \
+  --assert-header-eq "Content-Encoding: gzip" \
+  --assert-body-eq '{"status":"success"}' \
+  https://api.example.com/
+```
+
+**Nothing is advertised in `Accept-Encoding` unless you ask for it.** `curl` and
+Go's HTTP client both add the header on your behalf; this does not, so a server
+that compresses only on request will answer in plain. Ask with `-H` when you
+want to exercise content negotiation.
+
+**An encoding with no decoder here fails only the body assertions**, naming
+itself, and leaves the rest of the run intact:
+
+```console
+$ http-assert --assert-body '"status":"success"' https://cdn.example.com/
+- body: response is br-encoded and was not decoded: no decoder for "br"; gzip and deflate are supported
+
+$ http-assert --assert-ok https://cdn.example.com/
+[+] PASSED 38ms
+```
+
+Brotli and zstd are the encodings this covers in practice. Neither has a
+decoder in the Go standard library, and a health-check tool is not worth a
+dependency for it -- so a status check keeps working while a body assertion
+says plainly that it cannot run.
+
+A header that claims an encoding the body does not have is treated the same
+way. Reading those bytes as plain text would be its own silent corruption.
 
 ### Logging Options
 

@@ -65,9 +65,26 @@
 // --max-time bounds each attempt; --retry-max-time bounds the whole run. The
 // latter is checked before each retry, so an attempt already in flight can
 // overrun it by up to one --max-time.
+//
+// # Compression
+//
+// A compressed body is decoded before the assertions run, so --assert-body and
+// friends always see the payload. gzip and deflate are understood; an encoding
+// nothing here can remove fails the body assertions by name and leaves every
+// other assertion alone.
+//
+// The request advertises no Accept-Encoding of its own, and the response
+// headers are reported exactly as they arrived. net/http would decode only
+// what it had asked for itself and would delete Content-Encoding and
+// Content-Length on the way, which made a response that was compressed
+// indistinguishable from one that never was.
 package main
 
 import (
+	"bytes"
+	"compress/flate"
+	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -150,7 +167,17 @@ Retries:
 
   -m bounds each attempt, not the run. --retry-max-time bounds the run and is
   checked before each retry, so an attempt already in flight can overrun it.
-  Both --retry-delay and --retry-max-time need --retry to mean anything.`,
+  Both --retry-delay and --retry-max-time need --retry to mean anything.
+
+Compression:
+  A compressed body is decoded before the assertions run, so --assert-body and
+  the other body assertions always see the payload. gzip and deflate are
+  understood; an encoding with no decoder here fails the body assertions by
+  name and leaves --assert-ok, --assert-status and --assert-header* alone.
+
+  Nothing is advertised in Accept-Encoding unless -H says so, and the response
+  headers are reported exactly as they arrived -- so a body can be asserted on
+  and its Content-Encoding at the same time.`,
 		Example: `  # A health check: any non-error status passes
   http-assert --assert-ok https://example.com/health
 
@@ -761,6 +788,7 @@ func (c Client) doOnce(client *http.Client, req *http.Request, assertions []Asse
 	c.logInfo("[:] %s %s\n", res.Proto, res.Status)
 	httpRes := &httpResponse{Response: res}
 	httpRes.BodyBytes, _ = io.ReadAll(res.Body)
+	httpRes.decodeBody()
 
 	var assertErrors []error
 	for i := range assertions {
@@ -833,7 +861,17 @@ func (c Client) getHttpClient() *http.Client {
 	}
 
 	tr := &http.Transport{
-		ForceAttemptHTTP2:     false,
+		ForceAttemptHTTP2: false,
+		// net/http decodes a gzip response only when it was the layer that
+		// asked for it, and hands over the raw bytes otherwise. Four unrelated
+		// conditions decide which happens -- a caller-set Accept-Encoding, a
+		// Range header, the method, and this field -- so whether --assert-body
+		// saw the payload or a compressed blob depended on flags that have
+		// nothing to do with the body (#27).
+		//
+		// Decoding is done here instead, in decodeBody, on every response. One
+		// path, and the request carries exactly the headers it was told to.
+		DisableCompression:    true,
 		MaxIdleConns:          10,
 		IdleConnTimeout:       20 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
@@ -903,6 +941,98 @@ func (c Client) log(l LogLevel, format string, args ...interface{}) {
 type httpResponse struct {
 	*http.Response
 	BodyBytes []byte
+	// Encoding is the response's Content-Encoding, verbatim, and empty when
+	// there was none.
+	//
+	// The header itself is left alone. net/http deletes it (and Content-Length)
+	// when it decodes, which makes a response that was compressed
+	// indistinguishable from one that never was -- and the whole reason to set
+	// Accept-Encoding by hand is to find out which happened.
+	Encoding string
+	// DecodeErr is why BodyBytes is still encoded. Nil means BodyBytes is the
+	// payload, whether or not anything had to be removed to get there.
+	DecodeErr error
+}
+
+// decoders maps a Content-Encoding to something that removes it. Content
+// coding names are case-insensitive per RFC 9110, so lookups are lowered.
+//
+// deflate is absent by name because it is two formats: RFC 9110 says zlib, and
+// a good deal of the web sends raw. decodeDeflate tries both.
+var decoders = map[string]func([]byte) ([]byte, error){
+	"gzip":    decodeGzip,
+	"deflate": decodeDeflate,
+}
+
+// decodeBody removes the Content-Encoding from BodyBytes, leaving every header
+// exactly as it arrived.
+//
+// An encoding nothing here can remove is not an error by itself: a response
+// body the tool cannot read still has a status and headers worth asserting on.
+// It is recorded instead, and only the body assertions refuse (see bodyOf).
+func (r *httpResponse) decodeBody() {
+	r.Encoding = strings.TrimSpace(r.Header.Get("Content-Encoding"))
+
+	// An empty body has nothing to decode, and an empty gzip stream is an error
+	// rather than an empty payload -- so a 204 that carries the header anyway
+	// must not fail --assert-body-empty.
+	if len(r.BodyBytes) == 0 {
+		return
+	}
+
+	switch enc := strings.ToLower(r.Encoding); enc {
+	case "", "identity":
+		return
+	default:
+		decode, ok := decoders[enc]
+		if !ok {
+			r.DecodeErr = fmt.Errorf("no decoder for %q; gzip and deflate are supported", r.Encoding)
+			return
+		}
+
+		b, err := decode(r.BodyBytes)
+		if err != nil {
+			r.DecodeErr = err
+			return
+		}
+		r.BodyBytes = b
+	}
+}
+
+func decodeGzip(b []byte) ([]byte, error) {
+	zr, err := gzip.NewReader(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = zr.Close() }()
+
+	return io.ReadAll(zr)
+}
+
+// decodeDeflate tries zlib first and raw DEFLATE second.
+//
+// RFC 9110 defines the deflate coding as the zlib format, but servers sending
+// raw DEFLATE under the same name are common enough that net/http declines to
+// negotiate it at all ("Deflate is ambiguous and not as universally supported
+// anyway", transport.go). Guessing is safe here because neither reader accepts
+// the other's input: a wrong guess fails rather than producing plausible bytes.
+func decodeDeflate(b []byte) ([]byte, error) {
+	if zr, err := zlib.NewReader(bytes.NewReader(b)); err == nil {
+		defer func() { _ = zr.Close() }()
+		if out, err := io.ReadAll(zr); err == nil {
+			return out, nil
+		}
+	}
+
+	fr := flate.NewReader(bytes.NewReader(b))
+	defer func() { _ = fr.Close() }()
+
+	out, err := io.ReadAll(fr)
+	if err != nil {
+		return nil, fmt.Errorf("not valid zlib or raw DEFLATE: %w", err)
+	}
+
+	return out, nil
 }
 
 // maxPayloadBytes is how much of a body the failure dump shows before cropping.
@@ -930,6 +1060,14 @@ func (r httpResponse) writeTo(w io.Writer, withBody bool) {
 	if !withBody {
 		_, _ = fmt.Fprint(w, "  << Payload is omitted >>")
 		return
+	}
+	// The headers above still say how the body arrived, so plain text under a
+	// Content-Encoding header needs explaining -- as does a hex dump under one.
+	switch {
+	case r.DecodeErr != nil:
+		_, _ = fmt.Fprintf(w, "  << Payload is %s-encoded and was not decoded >>\n\n", r.Encoding)
+	case r.Encoding != "" && !strings.EqualFold(r.Encoding, "identity"):
+		_, _ = fmt.Fprintf(w, "  << Payload decoded from %s >>\n\n", r.Encoding)
 	}
 	if cropped := printPayload(w, r.BodyBytes, maxPayloadBytes); cropped > 0 {
 		_, _ = fmt.Fprintf(w, "\n\n  << Payload is cropped: %d bytes are hidden >>", cropped)
