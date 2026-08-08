@@ -82,6 +82,40 @@ func testHandler() http.Handler {
 		write(w, http.StatusMovedPermanently, nil, http.Header{"Location": {"/target"}})
 	})
 
+	// The endpoints below exist for --location. Note that /redirect above
+	// points at a real external host, so it must never be used with -L: the
+	// suite would leave the loopback interface and reach the internet.
+
+	// A redirect chain of a chosen length: /hop?n=3 -> /hop?n=2 -> ... ->
+	// /hop?n=0, which is the destination.
+	mux.HandleFunc("/hop", func(w http.ResponseWriter, r *http.Request) {
+		n, err := strconv.Atoi(r.URL.Query().Get("n"))
+		if err != nil || n <= 0 {
+			write(w, http.StatusOK, []byte("arrived"), nil)
+			return
+		}
+		write(w, http.StatusFound, nil, http.Header{
+			"Location": {fmt.Sprintf("/hop?n=%d", n-1)},
+		})
+	})
+
+	// Redirects to itself forever. Only the hop limit can end it, which is what
+	// makes it a test of the limit rather than of patience.
+	mux.HandleFunc("/redirect-loop", func(w http.ResponseWriter, _ *http.Request) {
+		write(w, http.StatusFound, nil, http.Header{"Location": {"/redirect-loop"}})
+	})
+
+	// One hop onto /ok, so the assertions that already match that payload can
+	// be pointed at the far side of a redirect.
+	mux.HandleFunc("/redirect-local", func(w http.ResponseWriter, _ *http.Request) {
+		write(w, http.StatusFound, nil, http.Header{"Location": {"/ok"}})
+	})
+
+	// 308 preserves the method and body across the hop; the 302 above does not.
+	mux.HandleFunc("/redirect-308", func(w http.ResponseWriter, _ *http.Request) {
+		write(w, http.StatusPermanentRedirect, nil, http.Header{"Location": {"/echo"}})
+	})
+
 	// Two values under one header name, for the multi-value matching path.
 	mux.HandleFunc("/multi", func(w http.ResponseWriter, _ *http.Request) {
 		write(w, http.StatusOK, []byte("ok"), http.Header{"Set-Cookie": {"a=1", "b=2"}})
