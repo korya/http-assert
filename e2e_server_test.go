@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -116,6 +119,51 @@ func testHandler() http.Handler {
 		write(w, http.StatusPermanentRedirect, nil, http.Header{"Location": {"/echo"}})
 	})
 
+	// The endpoints below exist for --retry: each fails a fixed number of times
+	// and then starts succeeding, which is the shape of a service coming up.
+	//
+	// Every one of them is keyed by an `id` the caller invents, because the
+	// count has to survive across subprocesses and must not be shared between
+	// two tests that happen to run together.
+
+	// /flaky?id=X&fail=N answers 503 to the first N requests carrying id X and
+	// 200 "healthy" from then on. A 503 fails --assert-ok, so this exercises
+	// retrying an assertion rather than a transport error.
+	mux.HandleFunc("/flaky", func(w http.ResponseWriter, r *http.Request) {
+		if hits(r) <= failCount(r) {
+			write(w, http.StatusServiceUnavailable, []byte("starting"), nil)
+			return
+		}
+		write(w, http.StatusOK, []byte("healthy"), nil)
+	})
+
+	// /flaky-echo?id=X&fail=N is /flaky with /echo's payload once it recovers,
+	// so a test can check what the *last* attempt actually sent.
+	mux.HandleFunc("/flaky-echo", func(w http.ResponseWriter, r *http.Request) {
+		if hits(r) <= failCount(r) {
+			write(w, http.StatusServiceUnavailable, []byte("starting"), nil)
+			return
+		}
+		echo(w, r)
+	})
+
+	// /flaky-hangup?id=X&fail=N drops the connection instead of answering, so
+	// the CLI sees a transport error rather than a response it can assert on.
+	mux.HandleFunc("/flaky-hangup", func(w http.ResponseWriter, r *http.Request) {
+		if hits(r) > failCount(r) {
+			write(w, http.StatusOK, []byte("healthy"), nil)
+			return
+		}
+		// Hijacking and closing without writing anything is the only way to
+		// produce a connection failure from inside a handler.
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			write(w, http.StatusInternalServerError, []byte(err.Error()), nil)
+			return
+		}
+		_ = conn.Close()
+	})
+
 	// Two values under one header name, for the multi-value matching path.
 	mux.HandleFunc("/multi", func(w http.ResponseWriter, _ *http.Request) {
 		write(w, http.StatusOK, []byte("ok"), http.Header{"Set-Cookie": {"a=1", "b=2"}})
@@ -178,28 +226,53 @@ func testHandler() http.Handler {
 	})
 
 	// Reflects the request so tests can observe -X, -H and -d taking effect.
-	mux.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
-		body := make([]byte, 0, 512)
-		if r.Body != nil {
-			buf := make([]byte, 512)
-			for {
-				n, err := r.Body.Read(buf)
-				body = append(body, buf[:n]...)
-				if err != nil {
-					break
-				}
-			}
-		}
-		payload, _ := json.Marshal(map[string]any{
-			"method":  r.Method,
-			"body":    string(body),
-			"headers": r.Header,
-			"host":    r.Host,
-		})
-		write(w, http.StatusOK, payload, http.Header{"Content-Type": {"application/json"}})
-	})
+	mux.HandleFunc("/echo", echo)
 
 	return mux
+}
+
+func echo(w http.ResponseWriter, r *http.Request) {
+	body := make([]byte, 0, 512)
+	if r.Body != nil {
+		buf := make([]byte, 512)
+		for {
+			n, err := r.Body.Read(buf)
+			body = append(body, buf[:n]...)
+			if err != nil {
+				break
+			}
+		}
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"method":  r.Method,
+		"body":    string(body),
+		"headers": r.Header,
+		"host":    r.Host,
+	})
+	write(w, http.StatusOK, payload, http.Header{"Content-Type": {"application/json"}})
+}
+
+// flakyHits counts requests per `id`, so the flaky endpoints can fail a fixed
+// number of times and then recover. Keyed rather than global because the CLI
+// under test is a subprocess -- the counter cannot live in it -- and two tests
+// sharing one counter would each see the other's attempts.
+var flakyHits sync.Map // id -> *atomic.Int64
+
+// hits returns how many requests this one is, counting from 1, for the id in
+// the query string.
+func hits(r *http.Request) int64 {
+	v, _ := flakyHits.LoadOrStore(r.URL.Query().Get("id"), &atomic.Int64{})
+	return v.(*atomic.Int64).Add(1)
+}
+
+// failCount is how many requests the caller asked to have fail before the
+// endpoint recovers. Absent or unparseable means "fail every time".
+func failCount(r *http.Request) int64 {
+	n, err := strconv.ParseInt(r.URL.Query().Get("fail"), 10, 64)
+	if err != nil {
+		return math.MaxInt64
+	}
+	return n
 }
 
 func acceptsGzip(r *http.Request) bool {

@@ -70,6 +70,9 @@ http-assert [flags] <URL>
 | `--maphost` | | Map hostname:port to different destination |
 | `--location` | `-L` | Follow redirects (see [Redirects](#redirects)) |
 | `--max-redirs` | | Maximum redirects to follow with `-L` (default: 10) |
+| `--retry` | | Retry a failed attempt this many times (see [Retries](#retries)) |
+| `--retry-delay` | | Delay between attempts (default: 1s) |
+| `--retry-max-time` | | Stop retrying after this long (default: no limit) |
 
 ### Assertion Options
 
@@ -139,6 +142,61 @@ Two notes on following:
 - `Authorization` and `Cookie` headers set with `-H` are dropped when a hop
   leaves the original domain. Redirects after the first are chosen by the
   server, which is why following is opt-in.
+
+### Retries
+
+The request is made once by default. `--retry` re-sends it after a failed
+attempt, waiting `--retry-delay` in between, and stops at the first attempt
+that passes:
+
+```console
+$ http-assert --retry 5 --retry-delay 1s --assert-ok https://api.example.com/health
+[.] HTTP/1.1 GET https://api.example.com/health
+[:] HTTP/1.1 503 Service Unavailable
+[-] FAILED 3ms
+
+[~] retry 1/5 in 1s
+[.] HTTP/1.1 GET https://api.example.com/health
+[:] HTTP/1.1 200 OK
+[+] PASSED 4ms
+```
+
+**Any failure is retried** -- an unreachable host and a wrong answer alike. The
+case this exists for is waiting for a service to come up, and there the response
+usually arrives perfectly well and says the wrong thing, so retrying only
+transport errors would miss the point. `curl` draws the line differently.
+
+**The delay is fixed, not exponential.** `--retry 30 --retry-delay 1s` reads as
+"poll once a second for half a minute", and the worst case can be worked out
+without a calculator. Sub-second values are allowed: `--retry-delay 250ms`.
+
+**`--max-time` bounds each attempt, not the run.** Both are needed, and the
+worst case is `retry x (max-time + retry-delay) + max-time` -- for `--retry 30`
+at the defaults, over ten minutes. `--retry-max-time` bounds the run instead:
+
+```console
+$ http-assert --retry 100 --retry-delay 5s --retry-max-time 30s --assert-ok https://api.example.com/health
+...
+Error: Cannot perform request: gave up after 6 attempts (--retry-max-time is 30s):
+```
+
+The budget is checked before each retry rather than enforced mid-request, as in
+`curl`, so an attempt already in flight can overrun it by up to one
+`--max-time`. `--retry-max-time 0` -- the default -- means no budget, leaving
+`--retry` as the only bound.
+
+The failure names how many attempts were made. A log showing one failure and no
+sign of the other five reads as a service that was never up, rather than one
+that never came up.
+
+Two combinations are refused with exit `71` rather than quietly ignored:
+`--retry-delay` or `--retry-max-time` without `--retry` (a value nobody will
+read), and a negative value for any of the three -- `pflag` accepts
+`--retry-delay=-2s` without complaint, and it would turn the pause between
+attempts into no pause at all. `--retry 0` is legal and means "make the request
+once", so `--retry ${RETRIES:-0} --retry-delay 1s` works.
+
+Note that the durations take a unit: `--retry-delay 5` is rejected, `5s` is not.
 
 ### Logging Options
 
@@ -259,6 +317,21 @@ http-assert -L \
 http-assert -L --max-redirs 2 --assert-ok https://old-domain.com/health
 ```
 
+### Waiting for a Service to Become Healthy
+
+```bash
+# Poll once a second for half a minute, passing as soon as it answers
+http-assert --retry 30 --retry-delay 1s --assert-ok https://api.example.com/health
+
+# Bound the wait by the clock rather than by the number of attempts
+http-assert --retry 100 --retry-delay 2s --retry-max-time 1m \
+  --assert-status 200 https://api.example.com/health
+
+# Poll a local service quickly; each attempt gets 2s, the run gets 10s
+http-assert --max-time 2 --retry 50 --retry-delay 200ms --retry-max-time 10s \
+  --assert-ok http://localhost:8080/healthz
+```
+
 ### Body Content Validation
 
 ```bash
@@ -299,7 +372,7 @@ export HTTP_ASSERT_INSECURE=true
 http-assert --assert-ok https://api.example.com
 ```
 
-**Every option not in that table is command-line only.** `--request`, `--header`, `--data`, `--location`, `--max-redirs` and every `--assert-*` flag ignore the environment; setting `HTTP_ASSERT_REQUEST=POST` has no effect.
+**Every option not in that table is command-line only.** `--request`, `--header`, `--data`, `--location`, `--max-redirs`, the three `--retry*` options and every `--assert-*` flag ignore the environment; setting `HTTP_ASSERT_REQUEST=POST` or `HTTP_ASSERT_RETRY=5` has no effect.
 
 **A command-line flag always wins over the environment**, which in turn wins over the built-in default. An empty variable counts as unset.
 
@@ -347,12 +420,13 @@ Repeating `--maphost` on the command line accumulates as usual.
 # Deploy and validate service
 deploy-service.sh
 
-# Wait for service to be ready
-sleep 10
-
-# Validate deployment
+# Wait for the service to come up, then validate the deployment. Retrying
+# replaces a fixed `sleep`: it returns as soon as the service is ready instead
+# of always waiting for the worst case, and it does not give up early when the
+# worst case is exceeded.
 http-assert \
   --max-time 30 \
+  --retry 30 --retry-delay 1s \
   --assert-ok \
   --assert-header-eq "X-Service-Version: $EXPECTED_VERSION" \
   https://api.example.com/health
@@ -377,7 +451,8 @@ ENDPOINTS=(
 )
 
 for endpoint in "${ENDPOINTS[@]}"; do
-  if http-assert --silent --assert-ok "$endpoint"; then
+  # Two retries so a single blip does not page anyone at 3am.
+  if http-assert --silent --retry 2 --retry-delay 5s --assert-ok "$endpoint"; then
     echo "✓ $endpoint"
   else
     echo "✗ $endpoint"
