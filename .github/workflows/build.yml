@@ -11,7 +11,10 @@ permissions:
 
 jobs:
 
-  build:
+  # Static analysis reaches the same verdict on every platform, so it runs
+  # once. Spreading it across the matrix would multiply the slowest checks --
+  # gosec and golangci-lint -- for output that cannot differ.
+  check:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
@@ -28,19 +31,65 @@ jobs:
       uses: golangci/golangci-lint-action@v9
       with:
         version: latest
+        # The action lints as well as installs unless told otherwise, and
+        # `just lint` is about to do exactly that with the repository's own
+        # configuration. Without this the linter runs twice per build.
+        install-only: true
 
     - name: Install gosec
       run: go install github.com/securego/gosec/v2/cmd/gosec@latest
 
-    - name: Run pre-commit checks
-      run: just pre-commit
+    - name: Run the static checks
+      run: just static-checks
+
+  # The tool ships for five platforms, and it is less OS-neutral than it looks:
+  # socket timeout behaviour, colon parsing around IPv6 literals, printable-rune
+  # classification and exit-code handling all differ. Testing only on Linux left
+  # every other user running a suite that had never executed on their machine.
+  #
+  # An empty Go version means "whatever go.mod requires"; 'stable' catches a
+  # regression on the next Go release rather than whenever go.mod next moves.
+  test:
+    name: test (${{ matrix.os }}, go ${{ matrix.go || 'from go.mod' }})
+    strategy:
+      # One platform failing must not hide the others; a matrix that stops at
+      # the first red leg reports one bug per run instead of all of them.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go: ['', 'stable']
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go }}
+        go-version-file: go.mod
+
+    - name: Install just
+      uses: extractions/setup-just@v4
+
+    - name: Run unit tests
+      run: just test-race
 
     - name: Run end-to-end tests
       run: just test-e2e
 
-    # The release configuration is otherwise only exercised when a tag is
-    # pushed, which is the worst moment to discover it is broken. Cross-compiles
-    # every published target and publishes nothing.
+  # The release configuration is otherwise only exercised when a tag is pushed,
+  # which is the worst moment to discover it is broken. Cross-compiles every
+  # published target and publishes nothing.
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
     - name: Build the release artifacts
       uses: goreleaser/goreleaser-action@v7
       with:
