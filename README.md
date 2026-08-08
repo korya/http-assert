@@ -1,4 +1,4 @@
-# http-assert ![Github Actions](https://github.com/korya/http-assert/actions/workflows/build.yml/badge.svg)
+# http-assert ![Github Actions](https://github.com/korya/http-assert/actions/workflows/build.yml/badge.svg) [![Go Reference](https://pkg.go.dev/badge/github.com/korya/http-assert.svg)](https://pkg.go.dev/github.com/korya/http-assert)
 
 Make an HTTP request, assert on what comes back, exit non-zero when it's wrong.
 
