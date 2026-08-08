@@ -127,6 +127,92 @@ func TestE2ERequestOptions(t *testing.T) {
 	})
 }
 
+// TestE2EDataImpliesPost pins that -d implies POST and curl's default
+// Content-Type, with -X and an explicit Content-Type header overriding.
+//
+// This lived in the known-issues file asserting that the method stayed GET;
+// it flipped when #28 was fixed.
+func TestE2EDataImpliesPost(t *testing.T) {
+	for _, tc := range []struct {
+		Name    string
+		Args    []string
+		Want    []string
+		NotWant []string
+	}{
+		{
+			Name: "bare -d implies POST and form Content-Type",
+			Args: []string{"-d", "hello=1"},
+			Want: []string{`\"method\":\"POST\"`, `\"body\":\"hello=1\"`,
+				"application/x-www-form-urlencoded"},
+		},
+		{
+			// The Content-Type follows -d, not the implied method, as in curl.
+			Name: "-X wins over -d, keeping the form Content-Type",
+			Args: []string{"-X", "PUT", "-d", "hello=1"},
+			Want: []string{`\"method\":\"PUT\"`, "application/x-www-form-urlencoded"},
+		},
+		{
+			Name: "explicit -X GET wins even against the default",
+			Args: []string{"-X", "GET", "-d", "hello=1"},
+			Want: []string{`\"method\":\"GET\"`},
+		},
+		{
+			Name:    "an explicit Content-Type is not replaced",
+			Args:    []string{"-d", "{}", "-H", "Content-Type: application/json"},
+			Want:    []string{`\"method\":\"POST\"`, "application/json"},
+			NotWant: []string{"application/x-www-form-urlencoded"},
+		},
+		{
+			Name: "empty -d still posts an empty body, with the form Content-Type",
+			Args: []string{"-d", ""},
+			Want: []string{`\"method\":\"POST\"`, `\"body\":\"\"`,
+				"application/x-www-form-urlencoded"},
+		},
+		{
+			Name:    "without -d nothing changes: GET, no Content-Type",
+			Args:    nil,
+			Want:    []string{`\"method\":\"GET\"`},
+			NotWant: []string{"application/x-www-form-urlencoded"},
+		},
+		{
+			// The suppression idiom from the README: an empty Content-Type
+			// counts as given, so the form default must not overwrite it.
+			Name:    "empty Content-Type header suppresses the default",
+			Args:    []string{"-d", "hello=1", "-H", "Content-Type:"},
+			Want:    []string{`\"method\":\"POST\"`},
+			NotWant: []string{"application/x-www-form-urlencoded"},
+		},
+	} {
+		t.Run(tc.Name, func(t *testing.T) {
+			args := append(tc.Args, "--assert-body-eq", "never-matches", url("/echo"))
+			r := run(t, nil, args...)
+			for _, want := range tc.Want {
+				assertContains(t, r, want)
+			}
+			for _, notWant := range tc.NotWant {
+				assertNotContains(t, r, notWant)
+			}
+		})
+	}
+
+	// The implied POST goes through the same replay machinery as an explicit
+	// one; these mirror the -X POST cases in the redirect and retry suites.
+	t.Run("308 replays the implied method and body", func(t *testing.T) {
+		r := run(t, nil, "-L", "-d", "replayed-payload",
+			"--assert-body", `"body":"replayed-payload".*"method":"POST"`,
+			url("/redirect-308"))
+		assertExit(t, r, exitOK)
+	})
+
+	t.Run("the implied POST body survives a retry", func(t *testing.T) {
+		r := run(t, nil, "--retry", "3", "--retry-delay", "50ms",
+			"-d", "replayed-payload",
+			"--assert-body", `"body":"replayed-payload".*"method":"POST"`,
+			flaky(t, "/flaky-echo", 2))
+		assertExit(t, r, exitOK)
+	})
+}
+
 // TestE2EHostMapping covers the option that distinguishes this tool from curl.
 func TestE2EHostMapping(t *testing.T) {
 	target := "http://mapped.invalid/ok"
@@ -376,5 +462,37 @@ func TestE2EHeaderRequiresASeparator(t *testing.T) {
 			assertExit(t, r, exitOK)
 		}
 		assertExit(t, run(t, nil, "--assert-header-missing", "X-Absent", url("/ok")), exitOK)
+	})
+}
+
+// TestE2EBadPatternIsRejected pins that an unparseable pattern is reported
+// as an invalid flag value rather than reaching the runtime as a panic.
+//
+// This lived in the known-issues file asserting the panic; it flipped when
+// #17 was fixed.
+func TestE2EBadPatternIsRejected(t *testing.T) {
+	for _, tc := range []struct {
+		Flag string
+		Arg  string
+	}{
+		{"--assert-body", "[unclosed"},
+		{"--assert-header", "X-Any: (unclosed"},
+		{"--assert-redirect", "[unclosed"},
+	} {
+		t.Run(tc.Flag, func(t *testing.T) {
+			r := run(t, nil, tc.Flag, tc.Arg, url("/ok"))
+
+			assertExit(t, r, exitBadFlagVal)
+			// The flag at fault is named, and the parser's reason survives.
+			assertContains(t, r, "Invalid value for "+tc.Flag+" flag")
+			assertContains(t, r, "error parsing regexp")
+			assertNotContains(t, r, "panic:")
+			assertNotContains(t, r, "goroutine")
+		})
+	}
+
+	// A pattern that compiles is unaffected.
+	t.Run("valid patterns still work", func(t *testing.T) {
+		assertExit(t, run(t, nil, "--assert-body", `"status":\s*"success"`, url("/ok")), exitOK)
 	})
 }
