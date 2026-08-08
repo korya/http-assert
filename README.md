@@ -1,16 +1,78 @@
-# http-assert ![Github Actions](https://github.com/korya/http-assert/actions/workflows/build.yml/badge.svg) [![Go Reference](https://pkg.go.dev/badge/github.com/korya/http-assert.svg)](https://pkg.go.dev/github.com/korya/http-assert)
+# http-assert ![Github Actions](https://github.com/korya/http-assert/actions/workflows/build.yml/badge.svg)
 
-A command-line tool for performing HTTP requests and asserting properties of the response. This tool is designed for testing HTTP endpoints, health checks, monitoring, and CI/CD pipelines.
+Make an HTTP request, assert on what comes back, exit non-zero when it's wrong.
 
-## Purpose
+```console
+$ http-assert --retry 30 --retry-delay 1s \
+    --assert-status 200 \
+    --assert-jq '.status == "healthy"' \
+    https://api.example.com/health
+[.] HTTP/1.1 GET https://api.example.com/health
+[:] HTTP/1.1 503 Service Unavailable
+[-] FAILED 12ms
 
-`http-assert` combines the functionality of making HTTP requests with the ability to validate responses against multiple criteria. It's particularly useful for:
+[~] retry 1/30 in 1s
+[.] HTTP/1.1 GET https://api.example.com/health
+[:] HTTP/1.1 200 OK
+[+] PASSED 9ms
+```
 
-- **Health checks and monitoring**: Verify that your APIs are returning expected responses
-- **CI/CD pipelines**: Validate deployed services before proceeding with deployment
-- **Integration testing**: Test HTTP endpoints with various assertion conditions
-- **Load balancer testing**: Use host mapping to test different backend servers
-- **Self-signed and internal endpoints**: `--insecure` reaches hosts that cannot present a verifiable certificate
+Each line is prefixed with a sigil: `[.]` request sent, `[>]` redirect
+followed, `[:]` response received, `[~]` waiting to retry, and `[+]`/`[-]` for
+the verdict. The exit code is the result.
+
+## Why
+
+Every pipeline has a step shaped like "deploy, then ask: is it actually up?"
+The stock answers each see half the picture:
+
+- **`curl -f`** checks the status code and nothing else. A health endpoint
+  answering `200` with `{"status":"degraded"}` passes.
+- **`curl -s … | jq -e`** checks the body and nothing else. A `503` whose body
+  still says `{"status":"ok"}` passes, because `jq` never sees the status code.
+- **Chaining both** closes those holes and opens others: the only diagnostic is
+  a bare exit code, nothing retries while the service comes up, and the
+  healthcheck image now needs `curl` *and* `jq` in it.
+
+`http-assert` is the missing middle: one static binary that makes the request,
+checks status, headers and body in a single pass, retries until the service is
+ready, and — when the check fails — reports every failing assertion with what
+it actually saw:
+
+```console
+$ http-assert --assert-status 200 --assert-jq '.status == "healthy"' https://api.example.com/health
+
+Error: Cannot perform request: 2 assertions failed:
+- status: expected 200, got 503 ("503 Service Unavailable")
+- jq[.status == "healthy"]: expected true, got "degraded"
+```
+
+Built for the places where the exit code is the whole point:
+
+- **Deploy gates** — replace `sleep 10; curl -f` with a poll that passes the
+  moment the service is ready and fails with evidence when it never is
+- **Container healthchecks** — statically linked, drops into a `scratch` or
+  `distroless` image with `COPY --from`
+- **Monitoring probes** — aggregated failure reports that read well in a CI
+  log, no ANSI codes
+- **Backend verification** — `--maphost` aims the same request at a specific
+  backend behind a load balancer
+
+The flags follow `curl` where that helps; where a checking tool needs a
+different answer, the deviation is deliberate and documented — see
+[Coming from curl](#coming-from-curl).
+
+## Contents
+
+- [Installation](#installation)
+- [Usage](#usage): [request options](#request-options),
+  [assertions](#assertion-options), [JSON](#json-assertions),
+  [redirects](#redirects), [retries](#retries), [compression](#compression),
+  [logging](#logging-options)
+- [Recipes](#recipes)
+- [Reference](#reference): [environment variables](#environment-variables),
+  [exit codes](#exit-codes), [coming from curl](#coming-from-curl)
+- [License](#license) · [Development](#development)
 
 ## Installation
 
@@ -49,14 +111,6 @@ http-assert completion zsh --help   # per-shell install instructions
 
 ```bash
 go install github.com/korya/http-assert@latest
-```
-
-### Build from Repository
-
-```bash
-git clone https://github.com/korya/http-assert.git
-cd http-assert
-go build -o http-assert .
 ```
 
 ## Usage
@@ -338,10 +392,6 @@ way. Reading those bytes as plain text would be its own silent corruption.
 **Everything the tool prints goes to stderr; stdout is always empty.** Use
 `2>&1` when capturing output in a file or a pipe.
 
-Each log line is prefixed with a sigil: `[.]` request sent, `[>]` redirect
-followed, `[:]` response received, `[~]` waiting to retry, and `[+]`/`[-]` for
-the verdict.
-
 `warn` is accepted but currently logs exactly what `error` does; nothing in the
 tool logs at the warn level.
 
@@ -360,59 +410,56 @@ http-assert version v0.1.0 (commit 4ffe282, built 2026-08-07T22:24:59Z, go1.25.5
 A binary built from a checkout rather than a release reports the commit it was
 built from instead of a tag.
 
-## Examples
+## Recipes
 
-### Basic Health Check
-
-```bash
-# Simple health check - assert 200 OK
-http-assert --assert-ok https://api.example.com/health
-```
-
-### POST Request with JSON Body
+### Deploy Gate
 
 ```bash
-# POST with JSON data; -d implies POST
+#!/bin/bash
+# Deploy and validate service
+deploy-service.sh
+
+# Wait for the service to come up, then validate the deployment. Retrying
+# replaces a fixed `sleep`: it returns as soon as the service is ready instead
+# of always waiting for the worst case, and it does not give up early when the
+# worst case is exceeded.
 http-assert \
-  -H "Content-Type: application/json" \
-  -d '{"username":"test","password":"secret"}' \
-  --assert-status 201 \
-  https://api.example.com/login
-```
-
-### Multiple Assertions
-
-```bash
-# Multiple assertions on the same request
-http-assert \
+  --max-time 30 \
+  --retry 30 --retry-delay 1s \
   --assert-ok \
-  --assert-header-eq "Content-Type: application/json" \
-  --assert-jq '.status == "success"' \
-  https://api.example.com/status
+  --assert-header-eq "X-Service-Version: $EXPECTED_VERSION" \
+  https://api.example.com/health
+
+if [ $? -eq 0 ]; then
+  echo "Deployment validation passed"
+else
+  echo "Deployment validation failed"
+  exit 1
+fi
 ```
 
-### Header Validation
+### Monitoring Script
 
 ```bash
-# Assert specific headers are present and have expected values
-http-assert \
-  --assert-header-eq "X-API-Version: v1" \
-  --assert-header-missing "X-Debug-Info" \
-  --assert-header "Cache-Control: max-age=\d+" \
-  https://api.example.com/data
+#!/bin/bash
+# Simple monitoring script
+ENDPOINTS=(
+  "https://api.example.com/health"
+  "https://db.example.com/ping"
+  "https://cache.example.com/status"
+)
+
+for endpoint in "${ENDPOINTS[@]}"; do
+  # Two retries so a single blip does not page anyone at 3am.
+  if http-assert --silent --retry 2 --retry-delay 5s --assert-ok "$endpoint"; then
+    echo "✓ $endpoint"
+  else
+    echo "✗ $endpoint"
+  fi
+done
 ```
 
-### SSL and Security Testing
-
-```bash
-# Test with SSL verification disabled
-http-assert --insecure --assert-ok https://self-signed.example.com
-
-# Test with custom timeout
-http-assert --max-time 5 --assert-ok https://slow-api.example.com
-```
-
-### Host Mapping for Load Balancer Testing
+### Checking Backends Behind a Load Balancer
 
 ```bash
 # Map requests to specific backend servers
@@ -428,67 +475,44 @@ http-assert \
   http://loadbalancer.example.com
 ```
 
-### Redirect Testing
 
 ```bash
-# Assert redirect to specific URL
-http-assert \
-  --assert-redirect-eq "https://new-domain.com/path" \
-  https://old-domain.com/path
+# Test all backend servers through load balancer
+BACKENDS=("backend1.internal" "backend2.internal" "backend3.internal")
 
-# Assert redirect matches pattern
-http-assert \
-  --assert-redirect "https://.*\.example\.com/.*" \
-  https://redirect.example.com
-
-# Note: URLs with query parameters should be quoted to avoid shell interpretation
-http-assert \
-  --assert-redirect-eq "https://example.com/target" \
-  "https://example.com/redirect?url=https://example.com/target"
-
-# Follow the chain instead, and assert on where it lands
-http-assert -L \
-  --assert-status 200 \
-  --assert-body '"status":\s*"ok"' \
-  https://old-domain.com/health
-
-# Cap the chain; exceeding the cap fails the run
-http-assert -L --max-redirs 2 --assert-ok https://old-domain.com/health
+for backend in "${BACKENDS[@]}"; do
+  echo "Testing $backend..."
+  http-assert \
+    --maphost "api.example.com:443=$backend:8443" \
+    --assert-ok \
+    --assert-header "X-Backend-Server: $backend" \
+    https://api.example.com/health
+done
 ```
 
-### Waiting for a Service to Become Healthy
+### POST with a JSON Body
 
 ```bash
-# Poll once a second for half a minute, passing as soon as it answers
-http-assert --retry 30 --retry-delay 1s --assert-ok https://api.example.com/health
-
-# Bound the wait by the clock rather than by the number of attempts
-http-assert --retry 100 --retry-delay 2s --retry-max-time 1m \
-  --assert-status 200 https://api.example.com/health
-
-# Poll a local service quickly; each attempt gets 2s, the run gets 10s
-http-assert --max-time 2 --retry 50 --retry-delay 200ms --retry-max-time 10s \
-  --assert-ok http://localhost:8080/healthz
+# POST with JSON data; -d implies POST
+http-assert \
+  -H "Content-Type: application/json" \
+  -d '{"username":"test","password":"secret"}' \
+  --assert-status 201 \
+  https://api.example.com/login
 ```
 
-### Body Content Validation
+### Header Validation
 
 ```bash
-# Assert exact body content
+# Assert specific headers are present and have expected values
 http-assert \
-  --assert-body-eq "OK" \
-  https://api.example.com/ping
-
-# Assert body matches regex pattern
-http-assert \
-  --assert-body "\"users\":\s*\[\]" \
-  https://api.example.com/users
-
-# Assert empty response body
-http-assert \
-  --assert-body-empty \
-  https://api.example.com/delete-resource
+  --assert-header-eq "X-API-Version: v1" \
+  --assert-header-missing "X-Debug-Info" \
+  --assert-header "Cache-Control: max-age=\d+" \
+  https://api.example.com/data
 ```
+
+## Reference
 
 ### Environment Variables
 
@@ -550,72 +574,48 @@ Repeating `--maphost` on the command line accumulates as usual.
 - `93`: Failed to perform HTTP request, or at least one assertion failed
 - `103`: Wrong argument count, or an unknown flag
 
-## Use Cases
+### Coming from curl
 
-### CI/CD Pipeline Integration
+The flags follow `curl`'s names and semantics wherever that helps. The
+deviations are deliberate — each is a place where `curl`'s answer is wrong for
+a tool whose job is checking — and this is the complete list:
 
-```bash
-#!/bin/bash
-# Deploy and validate service
-deploy-service.sh
-
-# Wait for the service to come up, then validate the deployment. Retrying
-# replaces a fixed `sleep`: it returns as soon as the service is ready instead
-# of always waiting for the worst case, and it does not give up early when the
-# worst case is exceeded.
-http-assert \
-  --max-time 30 \
-  --retry 30 --retry-delay 1s \
-  --assert-ok \
-  --assert-header-eq "X-Service-Version: $EXPECTED_VERSION" \
-  https://api.example.com/health
-
-if [ $? -eq 0 ]; then
-  echo "Deployment validation passed"
-else
-  echo "Deployment validation failed"
-  exit 1
-fi
-```
-
-### Monitoring Script
-
-```bash
-#!/bin/bash
-# Simple monitoring script
-ENDPOINTS=(
-  "https://api.example.com/health"
-  "https://db.example.com/ping"
-  "https://cache.example.com/status"
-)
-
-for endpoint in "${ENDPOINTS[@]}"; do
-  # Two retries so a single blip does not page anyone at 3am.
-  if http-assert --silent --retry 2 --retry-delay 5s --assert-ok "$endpoint"; then
-    echo "✓ $endpoint"
-  else
-    echo "✗ $endpoint"
-  fi
-done
-```
-
-### Load Balancer Health Check
-
-```bash
-# Test all backend servers through load balancer
-BACKENDS=("backend1.internal" "backend2.internal" "backend3.internal")
-
-for backend in "${BACKENDS[@]}"; do
-  echo "Testing $backend..."
-  http-assert \
-    --maphost "api.example.com:443=$backend:8443" \
-    --assert-ok \
-    --assert-header "X-Backend-Server: $backend" \
-    https://api.example.com/health
-done
-```
+| | `curl` | `http-assert` |
+|---|---|---|
+| Redirects | not followed without `-L` | same default; `-L` additionally refuses to combine with `--assert-redirect*`, which need the 3xx it consumes |
+| `-H 'Name'` with no colon | removes the header | rejected, exit `71`; write `-H 'Name:'` to send an empty value |
+| `-d @file` | reads the file | sends the literal string `@file` |
+| `-d` repeated | values joined with `&` | rejected, exit `71` |
+| `--retry` | transport errors and a fixed set of transient statuses, exponential backoff | any failed attempt, assertion failures included, fixed delay |
+| Response decompression | opt-in via `--compressed` | always: gzip and deflate are decoded before assertions run |
+| Pointing at a backend | `--resolve host:port:addr` takes an address | `--maphost 'host:port=dst[:port]'` takes a hostname or an address |
 
 ## License
 
 `http-assert` is free software, licensed under the GNU General Public License
 v3.0 — see [LICENSE](LICENSE).
+
+## Development
+
+### Build from Repository
+
+```bash
+git clone https://github.com/korya/http-assert.git
+cd http-assert
+go build -o http-assert .
+```
+
+### Working on the Code
+
+[`just`](https://github.com/casey/just) is the task runner, and CI runs the
+same recipes:
+
+```bash
+just pre-commit   # build, tidy-check, vet, lint, gosec, unit tests, race
+just test-e2e     # end-to-end suite: builds the CLI and drives it as a subprocess
+just pre-push     # everything CI runs, including the end-to-end suite
+just test-cover   # merged unit + end-to-end coverage
+```
+
+The end-to-end tests are opt-in — `go test ./...` runs the unit tests only, and
+`-e2e` (or the recipes above) switches the full suite on.
