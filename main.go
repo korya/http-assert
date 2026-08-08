@@ -1,3 +1,40 @@
+// Command http-assert performs an HTTP request and asserts properties of the
+// response, exiting non-zero when an assertion fails.
+//
+// It is built for the places where a failing exit code is the whole point: a
+// pipeline step, a container healthcheck, a monitoring script. Assertions are
+// declared as flags, and the request is made once and checked against all of
+// them.
+//
+//	http-assert --assert-ok https://example.com
+//	http-assert --assert-status 201 -X POST -d '{"n":1}' https://api.example.com/things
+//	http-assert --assert-header 'Content-Type: application/json' \
+//		--assert-body '"ok":true' https://api.example.com/health
+//
+// # Exit codes
+//
+// The exit code is the result. Distinguishing a failed assertion from a tool
+// that could not run is what lets a pipeline tell a broken service from a
+// broken invocation.
+//
+//	0    every assertion passed
+//	71   a flag or environment value failed to parse
+//	91   the request could not be constructed from the method and URL
+//	93   the request failed, or at least one assertion did
+//	103  wrong argument count, or an unknown flag
+//
+// # Environment
+//
+// Six options also read the environment, as HTTP_ASSERT_<NAME> with dashes
+// replaced by underscores: --verbose, --silent, --log-level, --insecure,
+// --max-time and --maphost. The command line wins over the environment, which
+// wins over the default. A value that does not parse is rejected rather than
+// coerced, so a typo fails loudly instead of silently disabling the option it
+// was meant to set.
+//
+// The remaining options are command-line only. Repeatable options split one
+// variable on whitespace, which suits host mappings and would corrupt header
+// values.
 package main
 
 import (
