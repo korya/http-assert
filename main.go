@@ -6,6 +6,10 @@
 // declared as flags, and the request is made once and checked against all of
 // them.
 //
+// The three header assertions can be repeated to assert several things at
+// once. Every other assertion flag takes a single value and is rejected if
+// given twice, rather than quietly keeping the last one.
+//
 //	http-assert --assert-ok https://example.com
 //	http-assert --assert-status 201 -X POST -d '{"n":1}' https://api.example.com/things
 //	http-assert --assert-header 'Content-Type: application/json' \
@@ -18,7 +22,7 @@
 // broken invocation.
 //
 //	0    every assertion passed
-//	71   a flag or environment value failed to parse
+//	71   a flag or environment value was rejected
 //	91   the request could not be constructed from the method and URL
 //	93   the request failed, or at least one assertion did
 //	103  wrong argument count, or an unknown flag
@@ -73,9 +77,13 @@ func main() {
 Assertions are declared as flags. The request is made once and checked
 against all of them, and every failure is reported, not just the first.
 
+Repeat --assert-header, --assert-header-eq or --assert-header-missing to make
+several assertions of that kind. Every other assertion flag takes a single
+value and is rejected if given twice, rather than quietly keeping the last.
+
 Exit codes:
   0    every assertion passed
-  71   a flag or environment value failed to parse
+  71   a flag or environment value was rejected
   91   the request could not be constructed from the method and URL
   93   the request failed, or at least one assertion did
   103  wrong argument count, or an unknown flag

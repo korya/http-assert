@@ -84,6 +84,8 @@ http-assert [flags] <URL>
 | `--assert-redirect` | Assert redirect location matches regex |
 | `--assert-redirect-eq` | Assert redirect location equals exact value |
 
+The three header flags can be repeated to make several assertions of that kind. Every other assertion flag takes a single value; giving one twice exits `71` rather than silently keeping the last.
+
 ### Logging Options
 
 | Flag | Short | Description |
@@ -268,7 +270,7 @@ Repeating `--maphost` on the command line accumulates as usual.
 ### Exit Codes
 
 - `0`: All assertions passed, or `--version`/`--help` was requested
-- `71`: A flag or environment value failed to parse
+- `71`: A flag or environment value was rejected
 - `91`: The request could not be constructed from the method and URL
 - `93`: Failed to perform HTTP request, or at least one assertion failed
 - `103`: Wrong argument count, or an unknown flag
