@@ -42,9 +42,14 @@
 //
 // # Redirects
 //
-// Redirects are not followed. A 3xx reaches the assertions as it stands, which
-// is the only reason --assert-redirect and --assert-redirect-eq can work: a
-// followed redirect leaves no Location header behind to assert on.
+// Redirects are not followed by default. A 3xx reaches the assertions as it
+// stands, which is the only reason --assert-redirect and --assert-redirect-eq
+// can work: a followed redirect leaves no Location header behind to assert on.
+//
+// --location follows the chain instead, and every assertion then applies to the
+// response at the end of it. --max-redirs bounds the chain. Because following
+// consumes the 3xx, --location and the two redirect assertions are mutually
+// exclusive rather than merely unusual together.
 package main
 
 import (
@@ -108,12 +113,18 @@ Environment:
   There is no flag for them.
 
 Redirects:
-  A 3xx response is asserted on as it stands; the redirect is not followed.
-  That is what --assert-redirect and --assert-redirect-eq assert against.
+  By default a 3xx response is asserted on as it stands and the redirect is
+  not followed. That is what --assert-redirect and --assert-redirect-eq
+  assert against.
 
   This is the opposite of curl's default, and --assert-ok counts a 3xx as
   success, so a redirecting endpoint passes a health check without the
-  resource behind it ever being fetched.`,
+  resource behind it ever being fetched.
+
+  -L follows the chain, and every assertion then applies to the response at
+  the end of it. --max-redirs bounds the chain and needs -L to mean anything.
+  -L cannot be combined with --assert-redirect or --assert-redirect-eq: the
+  3xx those inspect is the very thing -L consumes.`,
 		Example: `  # A health check: any non-error status passes
   http-assert --assert-ok https://example.com/health
 
@@ -121,18 +132,25 @@ Redirects:
   http-assert --assert-status 201 --assert-body '"id":\s*[0-9]+' https://example.com/things
 
   # Send a request to a specific backend, as curl --resolve does
-  http-assert --maphost 'example.com:443=127.0.0.1:8443' --assert-ok https://example.com/`,
+  http-assert --maphost 'example.com:443=127.0.0.1:8443' --assert-ok https://example.com/
+
+  # Follow the redirect chain and assert on where it lands
+  http-assert -L --assert-status 200 https://example.com/old`,
 		Version: versionString(),
 		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			insecure, _ := cmd.Flags().GetBool("insecure")
 			maxTime, _ := cmd.Flags().GetInt("max-time")
 			maphost, _ := cmd.Flags().GetStringArray("maphost")
+			location, _ := cmd.Flags().GetBool("location")
+			maxRedirs, _ := cmd.Flags().GetInt("max-redirs")
 			c := Client{
-				LogLevel:      mustParseLogLevel(cmd),
-				SkipSslChecks: insecure,
-				Timeout:       time.Duration(maxTime) * time.Second,
-				HostMappings:  mustParseHostMappings(maphost),
+				LogLevel:        mustParseLogLevel(cmd),
+				SkipSslChecks:   insecure,
+				Timeout:         time.Duration(maxTime) * time.Second,
+				HostMappings:    mustParseHostMappings(maphost),
+				FollowRedirects: location,
+				MaxRedirects:    maxRedirs,
 			}
 			c.Init()
 
@@ -175,6 +193,10 @@ Redirects:
 	cmd.Flags().StringArrayP("header", "H", nil, "Set header for HTTP request")
 	cmd.Flags().StringP("data", "d", "",
 		"Sends the specified data in a POST request to the HTTP server")
+	cmd.Flags().BoolP("location", "L", false,
+		"Follow redirects; assertions then apply to the end of the chain")
+	cmd.Flags().Int("max-redirs", 10,
+		"Maximum number of redirects to follow; requires --location")
 	registerAssertionFlags(cmd)
 	rejectRepeats(cmd.Flags())
 
@@ -183,6 +205,7 @@ Redirects:
 		// be mistaken for a second occurrence on the command line.
 		checkRepeats(cmd.Flags())
 		applyEnv(cmd.Flags())
+		checkRedirectFlags(cmd.Flags())
 	}
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -226,6 +249,44 @@ func applyEnv(fs *pflag.FlagSet) {
 		if err := f.Value.Set(v); err != nil {
 			dief(71, "Invalid value for %s=%q: %s", key, v, err)
 		}
+	}
+}
+
+// checkRedirectFlags rejects the three ways --location and --max-redirs can be
+// asked for something they cannot deliver.
+//
+// The first is the one worth refusing loudly. --assert-redirect* inspects the
+// 3xx, and --location is the instruction to consume it, so the pair is a
+// contradiction rather than a combination. Resolving it silently either way
+// leaves a run reporting success for a check it never made.
+//
+// The other two are smaller versions of the same thing: a --max-redirs nobody
+// will read because nothing is being followed, and a negative bound that would
+// refuse the redirect it was meant to permit. Zero is allowed and means what it
+// means in curl -- follow none.
+func checkRedirectFlags(fs *pflag.FlagSet) {
+	follow, _ := fs.GetBool("location")
+
+	if follow {
+		for _, name := range []string{"assert-redirect", "assert-redirect-eq"} {
+			if fs.Changed(name) {
+				dief(71, "Flags --location and --%s cannot be used together: "+
+					"--location follows the redirect, which consumes the 3xx "+
+					"response --%s inspects", name, name)
+			}
+		}
+	}
+
+	if !fs.Changed("max-redirs") {
+		return
+	}
+	if !follow {
+		dief(71, "Flag --max-redirs bounds a redirect chain that is not being "+
+			"followed; pass --location, or drop --max-redirs")
+	}
+	if n, _ := fs.GetInt("max-redirs"); n < 0 {
+		dief(71, "Invalid value for --max-redirs flag: %d; it counts redirects, "+
+			"so the smallest meaningful value is 0", n)
 	}
 }
 
@@ -488,6 +549,12 @@ type Client struct {
 	SkipSslChecks bool
 	Timeout       time.Duration
 	HostMappings  []hostMapping
+	// FollowRedirects turns a 3xx into another request rather than the
+	// response the assertions run against.
+	FollowRedirects bool
+	// MaxRedirects bounds the chain. Zero refuses every redirect; it is only
+	// read when FollowRedirects is set.
+	MaxRedirects int
 }
 
 func (c *Client) Init() {
@@ -500,6 +567,11 @@ func (c *Client) Init() {
 	}
 }
 
+// errTooManyRedirects marks the one transport-shaped failure this program
+// produces itself. Do needs to tell it apart from a network failure, and
+// matching on net/http's message text would be a promise net/http never made.
+var errTooManyRedirects = errors.New("too many redirects")
+
 func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 	if len(assertions) == 0 {
 		return fmt.Errorf("no assertions defined")
@@ -510,10 +582,22 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 	// G704: the request URL comes from the operator's own command line, and
 	// fetching it is the entire purpose of this tool -- no trust boundary is
 	// crossed, so this is not SSRF.
+	//
+	// --location widens that slightly: the hops after the first are chosen by
+	// the server, not the operator. It stays opt-in for exactly that reason,
+	// and net/http drops Authorization and Cookie when a hop leaves the
+	// original domain, so credentials passed with -H do not travel.
 	res, err := c.getHttpClient().Do(req) // #nosec G704 - user asked for this URL
 	if err != nil {
 		var b strings.Builder
-		fmt.Fprintf(&b, "failed to send request:\n- %s\n", err)
+		// The transport did its job here; this program stopped the chain.
+		// Filing that under "failed to send request" sends the reader looking
+		// for a network problem that does not exist.
+		if errors.Is(err, errTooManyRedirects) {
+			fmt.Fprintf(&b, "redirect chain was not followed to the end:\n- %s\n", err)
+		} else {
+			fmt.Fprintf(&b, "failed to send request:\n- %s\n", err)
+		}
 		c.writeHttpDetails(&b, req, nil)
 		return errors.New(b.String())
 	}
@@ -547,6 +631,13 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 
 func (c Client) writeHttpDetails(w io.Writer, req *http.Request, res *httpResponse) {
 	_, _ = fmt.Fprintf(w, "\nFAILED: %s %s (%s)\n\n", req.Method, req.URL, req.Proto)
+	// With --location the response below came from somewhere else, and the
+	// request dumped after this is the one that started the chain rather than
+	// the one that produced it. Say so; a reader cannot infer it. The method
+	// is worth printing too, because a 302 rewrites POST to GET.
+	if res != nil && res.Request != nil && res.Request.URL.String() != req.URL.String() {
+		_, _ = fmt.Fprintf(w, "Followed to: %s %s\n\n", res.Request.Method, res.Request.URL)
+	}
 	_ = req.Write(w)
 	_, _ = w.Write([]byte("\n\n"))
 	if res != nil {
@@ -579,7 +670,22 @@ func (c Client) getHttpClient() *http.Client {
 	return &http.Client{
 		Timeout: c.Timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse // Disallow redirects
+			if !c.FollowRedirects {
+				// The default. Hand the 3xx to the assertions intact --
+				// --assert-redirect* has nothing to look at otherwise.
+				return http.ErrUseLastResponse
+			}
+
+			// via holds the requests already sent, so the k-th redirect sees
+			// len(via) == k. net/http's own default writes >= here and so
+			// follows one fewer hop than its message claims; > is what makes
+			// --max-redirs N mean N, and --max-redirs 0 mean none.
+			if len(via) > c.MaxRedirects {
+				return fmt.Errorf("%w: --max-redirs is %d", errTooManyRedirects, c.MaxRedirects)
+			}
+
+			c.logInfo("[>] %d %s %s", len(via), req.Method, req.URL)
+			return nil
 		},
 		Transport: tr,
 	}

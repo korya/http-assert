@@ -68,6 +68,8 @@ http-assert [flags] <URL>
 | `--max-time` | `-m` | Request timeout in seconds (default: 20) |
 | `--insecure` | `-k` | Skip SSL certificate verification |
 | `--maphost` | | Map hostname:port to different destination |
+| `--location` | `-L` | Follow redirects (see [Redirects](#redirects)) |
+| `--max-redirs` | | Maximum redirects to follow with `-L` (default: 10) |
 
 ### Assertion Options
 
@@ -88,10 +90,10 @@ The three header flags can be repeated to make several assertions of that kind. 
 
 ### Redirects
 
-Redirects are not followed. A 3xx is delivered to the assertions exactly as it
-arrived, which is what makes `--assert-redirect` and `--assert-redirect-eq`
-possible at all -- a followed redirect has no `Location` header left to assert
-on.
+Redirects are not followed by default. A 3xx is delivered to the assertions
+exactly as it arrived, which is what makes `--assert-redirect` and
+`--assert-redirect-eq` possible at all -- a followed redirect has no `Location`
+header left to assert on.
 
 Callers arriving from `curl` should note that this is the opposite default.
 Combined with `--assert-ok` treating a 3xx as success, a redirecting endpoint
@@ -107,6 +109,36 @@ $ http-assert --assert-ok https://old-domain.com/health
 
 Assert the status you actually mean (`--assert-status 200`) when that is not
 what you wanted.
+
+`-L` follows the chain instead, and every assertion then applies to the
+response at the end of it:
+
+```console
+$ http-assert -L --assert-status 200 https://old-domain.com/health
+[.] HTTP/1.1 GET https://old-domain.com/health
+[>] 1 GET https://new-domain.com/health
+[:] HTTP/1.1 200 OK
+[+] PASSED 121ms
+```
+
+`--max-redirs` bounds the chain and defaults to 10. `--max-redirs 0` refuses
+every redirect, as in `curl`. Exceeding the bound exits `93` and says so
+explicitly, rather than reporting a network failure that did not happen. The
+option needs `-L` to mean anything, so passing it alone exits `71` rather than
+being quietly ignored.
+
+`-L` cannot be combined with `--assert-redirect` or `--assert-redirect-eq`
+(exit `71`). Following the redirect consumes the 3xx those two exist to
+inspect, so the combination has no reading in which both flags get what they
+asked for.
+
+Two notes on following:
+
+- A `302` on a `POST` is rewritten to a `GET` with no body, per the HTTP
+  specification. Use `307` or `308` to preserve the method and body.
+- `Authorization` and `Cookie` headers set with `-H` are dropped when a hop
+  leaves the original domain. Redirects after the first are chosen by the
+  server, which is why following is opt-in.
 
 ### Logging Options
 
@@ -216,6 +248,15 @@ http-assert \
 http-assert \
   --assert-redirect-eq "https://example.com/target" \
   "https://example.com/redirect?url=https://example.com/target"
+
+# Follow the chain instead, and assert on where it lands
+http-assert -L \
+  --assert-status 200 \
+  --assert-body '"status":\s*"ok"' \
+  https://old-domain.com/health
+
+# Cap the chain; exceeding the cap fails the run
+http-assert -L --max-redirs 2 --assert-ok https://old-domain.com/health
 ```
 
 ### Body Content Validation
