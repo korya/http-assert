@@ -1,9 +1,6 @@
 package main_test
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 // This file pins behaviour that is currently WRONG. Each test asserts what the
 // tool does today and names the issue tracking the defect.
@@ -44,25 +41,6 @@ func TestIssue17BadPatternIsRejected(t *testing.T) {
 	t.Run("valid patterns still work", func(t *testing.T) {
 		assertExit(t, run(t, nil, "--assert-body", `"status":\s*"success"`, url("/ok")), exitOK)
 	})
-}
-
-// TestKnownIssue19RequestBodyMissing: the request is dumped after the transport
-// has drained its body, so Content-Length advertises bytes that are not shown.
-func TestKnownIssue19RequestBodyMissing(t *testing.T) {
-	characterizes(t, 19, "the request dump omits the -d payload it advertises")
-
-	r := run(t, nil, "-X", "POST", "-d", "sent-but-not-shown", "--assert-status", "999", url("/echo"))
-	assertExit(t, r, exitRequestFail)
-
-	// The echoed response proves the body reached the server...
-	assertContains(t, r, "sent-but-not-shown")
-	// ...while the request dump advertises its length and shows nothing.
-	assertContains(t, r, "Content-Length: 18")
-
-	reqDump, _, _ := strings.Cut(r.Output(), "HTTP/1.1 200 OK")
-	if strings.Contains(reqDump, "sent-but-not-shown") {
-		t.Fatal("request dump now includes the body; #19 is fixed -- update this test")
-	}
 }
 
 // TestKnownIssue20AssertOkAcceptsRedirects: --assert-ok is documented as "2xx"

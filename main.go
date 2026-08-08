@@ -899,11 +899,52 @@ func (c Client) writeHttpDetails(w io.Writer, req *http.Request, res *httpRespon
 	if res != nil && res.Request != nil && res.Request.URL.String() != req.URL.String() {
 		_, _ = fmt.Fprintf(w, "Followed to: %s %s\n\n", res.Request.Method, res.Request.URL)
 	}
-	_ = req.Write(w)
+	writeRequest(w, req)
 	_, _ = w.Write([]byte("\n\n"))
 	if res != nil {
 		res.writeTo(w, c.LogLevel >= LInfo)
 		_, _ = w.Write([]byte("\n\n"))
+	}
+}
+
+// writeRequest renders the request for a person reading a failure report, the
+// way writeTo renders the response.
+//
+// http.Request.Write alone gets this wrong twice. Its body has already been
+// consumed by the send, so it emits headers claiming a Content-Length with
+// nothing behind them -- the first question after a failed POST is "what did I
+// send?", and that was the one thing the dump left out (#19). And it is a
+// wire-format serializer, so a long or binary payload would land in the report
+// raw: the same mistake #18 fixed on the response side.
+//
+// So the headers come from Write, which knows what actually goes on the wire
+// (Host, User-Agent, Content-Length are none of them in req.Header), and the
+// body goes through the shared renderer that crops and hex-dumps.
+func writeRequest(w io.Writer, req *http.Request) {
+	// A fresh clone replays the body; without GetBody there is nothing to
+	// replay and the dump is no worse than it was.
+	dump := req
+	if fresh, err := cloneForAttempt(req); err == nil {
+		dump = fresh
+	}
+
+	var b bytes.Buffer
+	if err := dump.Write(&b); err != nil {
+		// A failed dump must not replace the failure being reported, so
+		// whatever was rendered before the error still goes out.
+		_, _ = w.Write(b.Bytes())
+		return
+	}
+
+	head, body, found := bytes.Cut(b.Bytes(), []byte("\r\n\r\n"))
+	_, _ = w.Write(head)
+	_, _ = w.Write([]byte("\r\n\r\n"))
+	if !found || len(body) == 0 {
+		return
+	}
+
+	if cropped := printPayload(w, body, maxPayloadBytes); cropped > 0 {
+		_, _ = fmt.Fprintf(w, "\n\n  << Payload is cropped: %d bytes are hidden >>", cropped)
 	}
 }
 
