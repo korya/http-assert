@@ -51,6 +51,9 @@ jobs:
   # regression on the next Go release rather than whenever go.mod next moves.
   test:
     name: test (${{ matrix.os }}, go ${{ matrix.go || 'from go.mod' }})
+    # A vet or lint failure fails every leg identically, so there is no reason
+    # to occupy six runners finding that out six times.
+    needs: check
     strategy:
       # One platform failing must not hide the others; a matrix that stops at
       # the first red leg reports one bug per run instead of all of them.
@@ -81,6 +84,9 @@ jobs:
   # which is the worst moment to discover it is broken. Cross-compiles every
   # published target and publishes nothing.
   release-snapshot:
+    # Last, because packaging code that does not pass its tests on every
+    # platform it is packaged for answers a question nobody asked.
+    needs: test
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
