@@ -157,13 +157,13 @@ func isProxyVar(name string) bool {
 }
 
 // Exit codes the CLI is contracted to return. Nothing in the repo documented
-// these before this suite existed; see #24.
+// these before this suite existed (see #24); the categories shrank to three
+// when the invocation/transport/assertion model landed.
 const (
-	exitOK          = 0   // every assertion passed
-	exitBadFlagVal  = 71  // a flag value failed to parse (--log-level, --maphost)
-	exitBadRequest  = 91  // the request could not be constructed (-X, URL)
-	exitRequestFail = 93  // transport failure, or at least one assertion failed
-	exitUsage       = 103 // wrong argument count, unknown flag
+	exitOK            = 0  // every assertion passed
+	exitBadInvocation = 71 // the invocation was rejected; no request attempted
+	exitTransportFail = 92 // the request produced no usable response
+	exitAssertFail    = 93 // a response arrived and at least one assertion failed
 )
 
 // assertExit fails the test with full context when the exit code is unexpected.

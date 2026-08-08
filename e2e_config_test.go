@@ -40,7 +40,7 @@ type configCase struct {
 
 // noAssertions is the error the CLI emits when no --assert-* flag was parsed.
 // For every assertion option, "did it apply?" reduces to "is this absent?".
-const noAssertions = "no assertions defined"
+const noAssertions = "No assertions specified"
 
 func assertionApplied(r result) bool { return !strings.Contains(r.Output(), noAssertions) }
 
@@ -246,7 +246,7 @@ func TestE2EConfigPrecedence(t *testing.T) {
 		if !timedOut(r) {
 			t.Fatalf("env won over the command line; the request completed\n%s", r.Output())
 		}
-		assertExit(t, r, exitRequestFail)
+		assertExit(t, r, exitTransportFail)
 	})
 
 	t.Run("environment beats the built-in default", func(t *testing.T) {
@@ -282,7 +282,7 @@ func TestE2EConfigEnvSliceSeparator(t *testing.T) {
 			"--assert-ok", target)
 		// The whole string is taken as one mapping, whose destination port is
 		// then unparseable.
-		assertExit(t, r, exitBadFlagVal)
+		assertExit(t, r, exitBadInvocation)
 		assertContains(t, r, "Invalid value for --maphost flag")
 	})
 
@@ -374,7 +374,7 @@ func TestE2EConfigEnvInvalidValues(t *testing.T) {
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
 			r := run(t, tc.Env, append(tc.Args, "--assert-ok", url("/ok"))...)
-			assertExit(t, r, exitBadFlagVal)
+			assertExit(t, r, exitBadInvocation)
 			assertContains(t, r, tc.Diag)
 			// The reason is passed through rather than swallowed.
 			assertContains(t, r, "invalid syntax")
@@ -385,13 +385,13 @@ func TestE2EConfigEnvInvalidValues(t *testing.T) {
 	// them and their own parsers reject them. Same exit code, different message.
 	t.Run("log-level is validated by the level parser", func(t *testing.T) {
 		r := run(t, map[string]string{"HTTP_ASSERT_LOG_LEVEL": "trace"}, "--assert-ok", url("/ok"))
-		assertExit(t, r, exitBadFlagVal)
+		assertExit(t, r, exitBadInvocation)
 		assertContains(t, r, `Invalid value for --log-level flag: "trace"`)
 	})
 
 	t.Run("maphost is validated by the mapping parser", func(t *testing.T) {
 		r := run(t, map[string]string{"HTTP_ASSERT_MAPHOST": "garbage"}, "--assert-ok", url("/ok"))
-		assertExit(t, r, exitBadFlagVal)
+		assertExit(t, r, exitBadInvocation)
 		assertContains(t, r, "Invalid value for --maphost flag")
 	})
 }
@@ -429,7 +429,7 @@ func TestE2EConfigEnvBooleanForms(t *testing.T) {
 		for _, v := range []string{"yes", "on", "no", "off", "y", "n"} {
 			t.Run(v, func(t *testing.T) {
 				r := run(t, map[string]string{"HTTP_ASSERT_VERBOSE": v}, base...)
-				assertExit(t, r, exitBadFlagVal)
+				assertExit(t, r, exitBadInvocation)
 				assertContains(t, r, "Invalid value for HTTP_ASSERT_VERBOSE")
 			})
 		}

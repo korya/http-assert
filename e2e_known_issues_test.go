@@ -30,20 +30,10 @@ func TestKnownIssue23WildcardMaphostUnreachable(t *testing.T) {
 			characterizes(t, 23, "the parser rejects a wildcard the matcher supports")
 
 			r := run(t, nil, "--maphost", src+"="+hostPort(), "--assert-ok", "http://mapped.invalid/ok")
-			assertExit(t, r, exitBadFlagVal)
+			assertExit(t, r, exitBadInvocation)
 			assertContains(t, r, "Invalid value for --maphost flag")
 		})
 	}
-}
-
-// TestKnownIssue25NoAssertionsIsNotAUsageError: the condition is detected before
-// any request is made, yet reported with the transport-failure code.
-func TestKnownIssue25NoAssertionsIsNotAUsageError(t *testing.T) {
-	characterizes(t, 25, "a usage error is reported as 'Cannot perform request' with exit 93")
-
-	r := run(t, nil, url("/ok"))
-	assertExit(t, r, exitRequestFail) // ought to be exitUsage
-	assertContains(t, r, "Cannot perform request: no assertions defined")
 }
 
 // TestKnownIssue26MaphostErrorDiscarded: parseHostMappings produces a precise
@@ -52,7 +42,7 @@ func TestKnownIssue26MaphostErrorDiscarded(t *testing.T) {
 	characterizes(t, 26, "the specific parse error is replaced by the raw flag slice")
 
 	r := run(t, nil, "--maphost", "garbage", "--assert-ok", url("/ok"))
-	assertExit(t, r, exitBadFlagVal)
+	assertExit(t, r, exitBadInvocation)
 	assertContains(t, r, "Invalid value for --maphost flag: [garbage]")
 	assertNotContains(t, r, "has no separator")
 }
