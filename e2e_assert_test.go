@@ -295,3 +295,86 @@ func TestE2EAssertBooleanNegation(t *testing.T) {
 		assertContains(t, r, "was given 2 times")
 	})
 }
+
+// TestE2EHeaderRequiresASeparator covers the -H values the CLI refuses.
+//
+// A name on its own used to be sent as a header with an empty value. curl reads
+// the same input as "remove this header", so a user reaching for that idiom got
+// the opposite of what they asked for, silently (#33).
+func TestE2EHeaderRequiresASeparator(t *testing.T) {
+	for _, tc := range []struct {
+		Name string
+		Arg  string
+		Diag string
+	}{
+		{
+			Name: "a bare name",
+			Arg:  "BareHeader",
+			Diag: `Invalid value for --header flag: "BareHeader" has no ':' separator`,
+		},
+		{
+			// The common typo, and the reason this is worth an error rather
+			// than a best guess.
+			Name: "a name with a value but no colon",
+			Arg:  "X-Api-Key abc123",
+			Diag: "has no ':' separator",
+		},
+		{
+			// A colon is present but there is nothing in front of it, which
+			// would put a nameless header on the wire.
+			Name: "a colon with no name",
+			Arg:  ": value",
+			Diag: `has no header name before the ':'`,
+		},
+	} {
+		t.Run(tc.Name, func(t *testing.T) {
+			r := run(t, nil, "-H", tc.Arg, "--assert-ok", url("/ok"))
+			assertExit(t, r, exitBadFlagVal)
+			assertContains(t, r, tc.Diag)
+		})
+	}
+
+	// An empty -H is refused too, but only alongside another one. pflag reads a
+	// string array back through its own string form, in which a lone empty
+	// value serialises to "[]" and parses back as no values at all -- so a
+	// solitary -H '' never reaches this program. Harmless (it asks for no
+	// header and gets none) and worth pinning, because the pair below proves
+	// the validation itself is not what lets the single case through.
+	t.Run("an empty value alongside another", func(t *testing.T) {
+		r := run(t, nil, "-H", "X-Ok: 1", "-H", "", "--assert-ok", url("/ok"))
+		assertExit(t, r, exitBadFlagVal)
+		assertContains(t, r, "has no ':' separator")
+	})
+
+	t.Run("a solitary empty value is dropped before it arrives", func(t *testing.T) {
+		assertExit(t, run(t, nil, "-H", "", "--assert-ok", url("/ok")), exitOK)
+	})
+
+	// The message names the fix, because "no separator" alone leaves the
+	// reader guessing whether an empty value is even expressible.
+	t.Run("the error says how to send an empty value", func(t *testing.T) {
+		r := run(t, nil, "-H", "X-Foo", "--assert-ok", url("/ok"))
+		assertContains(t, r, `write "X-Foo:" to send the header with an empty value`)
+	})
+
+	t.Run("and that spelling works", func(t *testing.T) {
+		r := run(t, nil, "-H", "X-Foo:", "--assert-body", `"X-Foo":\[""\]`, url("/echo"))
+		assertExit(t, r, exitOK)
+	})
+
+	// Ordinary headers are untouched.
+	t.Run("a normal header still works", func(t *testing.T) {
+		r := run(t, nil, "-H", "X-Probe: 1", "--assert-body", `"X-Probe":\["1"\]`, url("/echo"))
+		assertExit(t, r, exitOK)
+	})
+
+	// The parser is shared with the header assertions, where a bare name is
+	// meaningful. Validating inside it would have broken these.
+	t.Run("--assert-header* still accept a bare name", func(t *testing.T) {
+		for _, f := range []string{"--assert-header", "--assert-header-eq"} {
+			r := run(t, nil, f, "Content-Type", url("/ok"))
+			assertExit(t, r, exitOK)
+		}
+		assertExit(t, run(t, nil, "--assert-header-missing", "X-Absent", url("/ok")), exitOK)
+	})
+}

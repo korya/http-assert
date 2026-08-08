@@ -64,7 +64,7 @@ http-assert [flags] <URL>
 |------|-------|-------------|
 | `--request` | `-X` | HTTP method (default: GET) |
 | `--data` | `-d` | Request body data |
-| `--header` | `-H` | Set request headers (can be used multiple times) |
+| `--header` | `-H` | Set request headers as `name: value` (can be used multiple times) |
 | `--max-time` | `-m` | Request timeout in seconds (default: 20) |
 | `--insecure` | `-k` | Skip SSL certificate verification |
 | `--maphost` | | Map hostname:port to different destination |
@@ -73,6 +73,8 @@ http-assert [flags] <URL>
 | `--retry` | | Retry a failed attempt this many times (see [Retries](#retries)) |
 | `--retry-delay` | | Delay between attempts (default: 1s) |
 | `--retry-max-time` | | Stop retrying after this long (default: no limit) |
+
+A `-H` value needs a colon. A bare name exits `71` rather than being sent as a header with an empty value, which is what `curl` reads as "remove this header" — so the two would have meant opposite things. Write `-H 'X-Foo:'` when an empty value is what you want.
 
 ### Assertion Options
 

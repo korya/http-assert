@@ -236,7 +236,7 @@ Compression:
 
 			vs, _ := cmd.Flags().GetStringArray("header")
 			for _, v := range vs {
-				name, value := parseHeaderLine(v)
+				name, value := mustParseRequestHeader(v)
 				req.Header.Add(name, value)
 			}
 			if err := c.Do(req, parseAssertionFlags(cmd)...); err != nil {
@@ -260,7 +260,8 @@ Compression:
 	cmd.PersistentFlags().IntP("max-time", "m", 20,
 		"Maximum time in seconds that you allow each request to take")
 	cmd.Flags().StringP("request", "X", "GET", "Set method for HTTP request")
-	cmd.Flags().StringArrayP("header", "H", nil, "Set header for HTTP request")
+	cmd.Flags().StringArrayP("header", "H", nil,
+		"Set header for HTTP request, as <name: value>; a name alone is rejected")
 	cmd.Flags().StringP("data", "d", "",
 		"Sends the specified data in a POST request to the HTTP server")
 	cmd.Flags().BoolP("location", "L", false,
@@ -452,6 +453,33 @@ func parseLogLevel(s string) (LogLevel, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// mustParseRequestHeader parses a -H value, refusing the two forms that would
+// put a header on the wire the caller did not describe.
+//
+// parseHeaderLine is shared with --assert-header*, where a name on its own is
+// meaningful: it asserts the header is present. A request has no such reading.
+// A name with no colon was sent as a header with an empty value, which is the
+// opposite of what the same input means to curl -- there it removes an
+// internally-generated header -- so a user reaching for that idiom got the one
+// outcome they were trying to avoid, silently (#33).
+//
+// The validation lives here rather than in the parser for that reason: the
+// parser is right for one caller and wrong for the other.
+func mustParseRequestHeader(v string) (name, value string) {
+	if !strings.Contains(v, ":") {
+		dief(71, "Invalid value for --header flag: %q has no ':' separator; "+
+			"write %q to send the header with an empty value", v, v+":")
+	}
+
+	name, value = parseHeaderLine(v)
+	if name == "" {
+		dief(71, "Invalid value for --header flag: %q has no header name "+
+			"before the ':'", v)
+	}
+
+	return name, value
 }
 
 func mustParseHostMappings(vals []string) []hostMapping {
