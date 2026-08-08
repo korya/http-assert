@@ -34,10 +34,10 @@ The stock answers each see half the picture:
   a bare exit code, nothing retries while the service comes up, and the
   healthcheck image now needs `curl` *and* `jq` in it.
 
-`http-assert` is the missing middle: one static binary that makes the request,
-checks status, headers and body in a single pass, retries until the service is
-ready, and — when the check fails — reports every failing assertion with what
-it actually saw:
+`http-assert` is the missing middle: one static binary. It makes the request,
+checks status, headers and body in one pass, and retries until the service is
+ready. When a check fails, it reports every failing assertion with what it
+actually saw:
 
 ```console
 $ http-assert --assert-status 200 --assert-jq '.status == "healthy"' https://api.example.com/health
@@ -49,18 +49,18 @@ Error: Cannot perform request: 2 assertions failed:
 
 Built for the places where the exit code is the whole point:
 
-- **Deploy gates** — replace `sleep 10; curl -f` with a poll that passes the
+- **Deploy gates**: replace `sleep 10; curl -f` with a poll that passes the
   moment the service is ready and fails with evidence when it never is
-- **Container healthchecks** — statically linked, drops into a `scratch` or
+- **Container healthchecks**: statically linked, drops into a `scratch` or
   `distroless` image with `COPY --from`
-- **Monitoring probes** — aggregated failure reports that read well in a CI
-  log, no ANSI codes
-- **Backend verification** — `--maphost` aims the same request at a specific
+- **Monitoring probes**: reports that name every failed check and stay
+  readable in a plain CI log
+- **Backend verification**: `--maphost` aims the same request at a specific
   backend behind a load balancer
 
 The flags follow `curl` where that helps; where a checking tool needs a
-different answer, the deviation is deliberate and documented — see
-[Coming from curl](#coming-from-curl).
+different answer, the deviation is deliberate, and
+[Coming from curl](#coming-from-curl) lists every one.
 
 ## Contents
 
@@ -140,11 +140,11 @@ rather than reporting a success it never checked.
 | `--retry-delay` | | Delay between attempts (default: 1s) |
 | `--retry-max-time` | | Stop retrying after this long (default: no limit) |
 
-A `-H` value needs a colon. A bare name exits `71` rather than being sent as a header with an empty value, which is what `curl` reads as "remove this header" — so the two would have meant opposite things. Write `-H 'X-Foo:'` when an empty value is what you want.
+A `-H` value needs a colon. A bare name exits `71` rather than being sent as a header with an empty value, which is what `curl` reads as "remove this header", so the two would have meant opposite things. Write `-H 'X-Foo:'` when an empty value is what you want.
 
 `-d` follows `curl`: the method becomes POST unless `-X` says otherwise, and `Content-Type: application/x-www-form-urlencoded` is set unless a `-H` provides one (`-H 'Content-Type:'` counts as providing one). Two deviations remain: `-d @file` sends the literal string `@file` rather than reading the file, and a repeated `-d` is rejected rather than joined with `&`.
 
-`--max-time` takes whole seconds; the three `--retry-*` options take durations with a unit (`1s`, `250ms`, `2m`). Requests are made over HTTP/1.1 — HTTP/2 is never attempted.
+`--max-time` takes whole seconds; the three `--retry-*` options take durations with a unit (`1s`, `250ms`, `2m`). Requests use HTTP/1.1; HTTP/2 is never attempted.
 
 ### Assertion Options
 
@@ -174,7 +174,7 @@ http-assert --assert-ok=false https://api.example.com/forbidden
 http-assert --assert-body-empty=false https://api.example.com/report
 ```
 
-The three body assertions run against the decoded payload, never the bytes on the wire — see [Compression](#compression).
+The three body assertions run against the decoded payload, never the bytes on the wire; see [Compression](#compression).
 
 ### JSON Assertions
 
@@ -541,7 +541,7 @@ http-assert --assert-ok https://api.example.com
 
 #### Proxies
 
-`HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are honoured for the request itself. There is no flag for them, and no way to disable the behaviour from the command line — if one of these is set in your environment for unrelated reasons, requests go through it.
+`HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are honoured for the request itself. There is no flag for them, and no way to disable the behaviour from the command line: if one of these is set in your environment for unrelated reasons, requests go through it.
 
 **A value that does not parse is rejected** rather than ignored, so a typo cannot silently change behaviour:
 
@@ -577,8 +577,8 @@ Repeating `--maphost` on the command line accumulates as usual.
 ### Coming from curl
 
 The flags follow `curl`'s names and semantics wherever that helps. The
-deviations are deliberate — each is a place where `curl`'s answer is wrong for
-a tool whose job is checking — and this is the complete list:
+deviations are deliberate, each one a place where `curl`'s answer is wrong for
+a tool whose job is checking. This is the complete list:
 
 | | `curl` | `http-assert` |
 |---|---|---|
@@ -593,7 +593,7 @@ a tool whose job is checking — and this is the complete list:
 ## License
 
 `http-assert` is free software, licensed under the GNU General Public License
-v3.0 — see [LICENSE](LICENSE).
+v3.0; see [LICENSE](LICENSE).
 
 ## Development
 
@@ -617,5 +617,5 @@ just pre-push     # everything CI runs, including the end-to-end suite
 just test-cover   # merged unit + end-to-end coverage
 ```
 
-The end-to-end tests are opt-in — `go test ./...` runs the unit tests only, and
+The end-to-end tests are opt-in: `go test ./...` runs the unit tests only, and
 `-e2e` (or the recipes above) switches the full suite on.
