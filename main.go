@@ -58,8 +58,48 @@ import (
 
 func main() {
 	cmd := &cobra.Command{
-		Use:     "http-assert <URL>",
-		Short:   "Perform HTTP request and assert received HTTP response",
+		Use:   "http-assert <URL>",
+		Short: "Perform HTTP request and assert received HTTP response",
+		// The exit code is the whole product, so it is documented where a
+		// person actually looks for it. The environment is here for the same
+		// reason: nothing else at the terminal reveals that six of these
+		// options can be set without touching the command line.
+		//
+		// Careful with the wording below: the end-to-end suite locates the
+		// flag list by cutting this output at the first "Flags:", so that
+		// exact string must not appear here (see e2e_panic_test.go).
+		Long: `Perform an HTTP request and assert properties of the response.
+
+Assertions are declared as flags. The request is made once and checked
+against all of them, and every failure is reported, not just the first.
+
+Exit codes:
+  0    every assertion passed
+  71   a flag or environment value failed to parse
+  91   the request could not be constructed from the method and URL
+  93   the request failed, or at least one assertion did
+  103  wrong argument count, or an unknown flag
+
+Environment:
+  Six options can also be set as HTTP_ASSERT_<NAME>, with dashes replaced by
+  underscores: HTTP_ASSERT_VERBOSE, HTTP_ASSERT_SILENT, HTTP_ASSERT_LOG_LEVEL,
+  HTTP_ASSERT_INSECURE, HTTP_ASSERT_MAX_TIME and HTTP_ASSERT_MAPHOST. Every
+  other option is command-line only.
+
+  The command line wins over the environment, which wins over the default. An
+  empty variable counts as unset, and a value that does not parse is rejected
+  rather than quietly replaced by a zero.
+
+  HTTP_PROXY, HTTPS_PROXY and NO_PROXY are honoured for the request itself.
+  There is no flag for them.`,
+		Example: `  # A health check: any non-error status passes
+  http-assert --assert-ok https://example.com/health
+
+  # Exact status plus a body pattern
+  http-assert --assert-status 201 --assert-body '"id":\s*[0-9]+' https://example.com/things
+
+  # Send a request to a specific backend, as curl --resolve does
+  http-assert --maphost 'example.com:443=127.0.0.1:8443' --assert-ok https://example.com/`,
 		Version: versionString(),
 		Args:    cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
