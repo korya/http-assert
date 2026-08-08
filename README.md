@@ -1,16 +1,78 @@
 # http-assert ![Github Actions](https://github.com/korya/http-assert/actions/workflows/build.yml/badge.svg) [![Go Reference](https://pkg.go.dev/badge/github.com/korya/http-assert.svg)](https://pkg.go.dev/github.com/korya/http-assert)
 
-A command-line tool for performing HTTP requests and asserting properties of the response. This tool is designed for testing HTTP endpoints, health checks, monitoring, and CI/CD pipelines.
+Make an HTTP request, assert on what comes back, exit non-zero when it's wrong.
 
-## Purpose
+```console
+$ http-assert --retry 30 --retry-delay 1s \
+    --assert-status 200 \
+    --assert-jq '.status == "healthy"' \
+    https://api.example.com/health
+[.] HTTP/1.1 GET https://api.example.com/health
+[:] HTTP/1.1 503 Service Unavailable
+[-] FAILED 12ms
 
-`http-assert` combines the functionality of making HTTP requests with the ability to validate responses against multiple criteria. It's particularly useful for:
+[~] retry 1/30 in 1s
+[.] HTTP/1.1 GET https://api.example.com/health
+[:] HTTP/1.1 200 OK
+[+] PASSED 9ms
+```
 
-- **Health checks and monitoring**: Verify that your APIs are returning expected responses
-- **CI/CD pipelines**: Validate deployed services before proceeding with deployment
-- **Integration testing**: Test HTTP endpoints with various assertion conditions
-- **Load balancer testing**: Use host mapping to test different backend servers
-- **SSL/TLS validation**: Test secure endpoints with certificate validation options
+Each line is prefixed with a sigil: `[.]` request sent, `[>]` redirect
+followed, `[:]` response received, `[~]` waiting to retry, and `[+]`/`[-]` for
+the verdict. The exit code is the result.
+
+## Why
+
+Every pipeline has a step shaped like "deploy, then ask: is it actually up?"
+The stock answers each see half the picture:
+
+- **`curl -f`** checks the status code and nothing else. A health endpoint
+  answering `200` with `{"status":"degraded"}` passes.
+- **`curl -s … | jq -e`** checks the body and nothing else. A `503` whose body
+  still says `{"status":"ok"}` passes, because `jq` never sees the status code.
+- **Chaining both** closes those holes and opens others: the only diagnostic is
+  a bare exit code, nothing retries while the service comes up, and the
+  healthcheck image now needs `curl` *and* `jq` in it.
+
+`http-assert` is the missing middle: one static binary. It makes the request,
+checks status, headers and body in one pass, and retries until the service is
+ready. When a check fails, it reports every failing assertion with what it
+actually saw:
+
+```console
+$ http-assert --assert-status 200 --assert-jq '.status == "healthy"' https://api.example.com/health
+
+Error: Cannot perform request: 2 assertions failed:
+- status: expected 200, got 503 ("503 Service Unavailable")
+- jq[.status == "healthy"]: expected true, got "degraded"
+```
+
+Built for the places where the exit code is the whole point:
+
+- **Deploy gates**: replace `sleep 10; curl -f` with a poll that passes the
+  moment the service is ready and fails with evidence when it never is
+- **Container healthchecks**: statically linked, drops into a `scratch` or
+  `distroless` image with `COPY --from`
+- **Monitoring probes**: reports that name every failed check and stay
+  readable in a plain CI log
+- **Backend verification**: `--maphost` aims the same request at a specific
+  backend behind a load balancer
+
+The flags follow `curl` where that helps; where a checking tool needs a
+different answer, the deviation is deliberate, and
+[Coming from curl](#coming-from-curl) lists every one.
+
+## Contents
+
+- [Installation](#installation)
+- [Usage](#usage): [request options](#request-options),
+  [assertions](#assertion-options), [JSON](#json-assertions),
+  [redirects](#redirects), [retries](#retries), [compression](#compression),
+  [logging](#logging-options)
+- [Recipes](#recipes)
+- [Reference](#reference): [environment variables](#environment-variables),
+  [exit codes](#exit-codes), [coming from curl](#coming-from-curl)
+- [License](#license) · [Development](#development)
 
 ## Installation
 
@@ -20,6 +82,7 @@ No Go toolchain required. Static binaries for Linux, macOS and Windows on
 amd64 and arm64 are attached to every [release](https://github.com/korya/http-assert/releases).
 
 ```bash
+# Pick the latest tag from https://github.com/korya/http-assert/releases
 VERSION=v0.1.0
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
@@ -36,18 +99,18 @@ tar xzf "$ARCHIVE" http-assert
 The binary is statically linked, so it drops straight into a `scratch` or
 `distroless` image with `COPY --from`.
 
+### Shell Completion
+
+Completion scripts for bash, zsh, fish and PowerShell are built in:
+
+```bash
+http-assert completion zsh --help   # per-shell install instructions
+```
+
 ### From Source
 
 ```bash
 go install github.com/korya/http-assert@latest
-```
-
-### Build from Repository
-
-```bash
-git clone https://github.com/korya/http-assert.git
-cd http-assert
-go build -o http-assert .
 ```
 
 ## Usage
@@ -57,6 +120,9 @@ go build -o http-assert .
 ```bash
 http-assert [flags] <URL>
 ```
+
+At least one `--assert-*` flag is required; a run with no assertions exits `93`
+rather than reporting a success it never checked.
 
 ### Request Options
 
@@ -74,9 +140,11 @@ http-assert [flags] <URL>
 | `--retry-delay` | | Delay between attempts (default: 1s) |
 | `--retry-max-time` | | Stop retrying after this long (default: no limit) |
 
-A `-H` value needs a colon. A bare name exits `71` rather than being sent as a header with an empty value, which is what `curl` reads as "remove this header" — so the two would have meant opposite things. Write `-H 'X-Foo:'` when an empty value is what you want.
+A `-H` value needs a colon. A bare name exits `71` rather than being sent as a header with an empty value, which is what `curl` reads as "remove this header", so the two would have meant opposite things. Write `-H 'X-Foo:'` when an empty value is what you want.
 
 `-d` follows `curl`: the method becomes POST unless `-X` says otherwise, and `Content-Type: application/x-www-form-urlencoded` is set unless a `-H` provides one (`-H 'Content-Type:'` counts as providing one). Two deviations remain: `-d @file` sends the literal string `@file` rather than reading the file, and a repeated `-d` is rejected rather than joined with `&`.
+
+`--max-time` takes whole seconds; the three `--retry-*` options take durations with a unit (`1s`, `250ms`, `2m`). Requests use HTTP/1.1; HTTP/2 is never attempted.
 
 ### Assertion Options
 
@@ -84,8 +152,8 @@ A `-H` value needs a colon. A bare name exits `71` rather than being sent as a h
 |------|-------------|
 | `--assert-ok` | Assert the status is not an error (2xx or 3xx) |
 | `--assert-status` | Assert specific status code |
-| `--assert-header` | Assert header matches regex pattern |
-| `--assert-header-eq` | Assert header equals exact value |
+| `--assert-header` | Assert header matches regex pattern; a name alone asserts presence |
+| `--assert-header-eq` | Assert header equals exact value; a name alone asserts presence |
 | `--assert-header-missing` | Assert header is not present |
 | `--assert-body` | Assert body matches regex pattern |
 | `--assert-body-eq` | Assert body equals exact value |
@@ -94,7 +162,7 @@ A `-H` value needs a colon. A bare name exits `71` rather than being sent as a h
 | `--assert-redirect` | Assert redirect location matches regex |
 | `--assert-redirect-eq` | Assert redirect location equals exact value |
 
-The three header flags can be repeated to make several assertions of that kind. Every other assertion flag takes a single value; giving one twice exits `71` rather than silently keeping the last.
+The three header flags and `--assert-jq` can be repeated to make several assertions of that kind. Every other assertion flag takes a single value; giving one twice exits `71` rather than silently keeping the last.
 
 `--assert-ok` and `--assert-body-empty` can be negated with `=false`, which asserts the opposite rather than cancelling the flag:
 
@@ -106,7 +174,7 @@ http-assert --assert-ok=false https://api.example.com/forbidden
 http-assert --assert-body-empty=false https://api.example.com/report
 ```
 
-The three body assertions run against the decoded payload, never the bytes on the wire — see [Compression](#compression).
+The three body assertions run against the decoded payload, never the bytes on the wire; see [Compression](#compression).
 
 ### JSON Assertions
 
@@ -166,10 +234,8 @@ exactly as it arrived, which is what makes `--assert-redirect` and
 `--assert-redirect-eq` possible at all -- a followed redirect has no `Location`
 header left to assert on.
 
-Callers arriving from `curl` should note that this is the opposite default.
-Combined with `--assert-ok` treating a 3xx as success, a redirecting endpoint
-passes a health check without the resource behind the redirect ever being
-fetched:
+`--assert-ok` treats a 3xx as success, so a redirecting endpoint passes a
+health check without the resource behind the redirect ever being fetched:
 
 ```console
 $ http-assert --assert-ok https://old-domain.com/health
@@ -293,10 +359,9 @@ http-assert \
   https://api.example.com/
 ```
 
-**Nothing is advertised in `Accept-Encoding` unless you ask for it.** `curl`
-sends the header on your behalf; this does not, so a server that compresses only
-on request will answer in plain. Ask with `-H` when you want to exercise content
-negotiation.
+**Nothing is advertised in `Accept-Encoding` unless you ask for it.** A server
+that compresses only on request will answer in plain; ask with
+`-H 'Accept-Encoding: gzip'` when you want to exercise content negotiation.
 
 **An encoding with no decoder here fails only the body assertions**, naming
 itself, and leaves the rest of the run intact:
@@ -324,6 +389,12 @@ way. Reading those bytes as plain text would be its own silent corruption.
 | `--silent` | `-s` | Only log errors |
 | `--log-level` | | Set log level (debug, info, warn, error) |
 
+**Everything the tool prints goes to stderr; stdout is always empty.** Use
+`2>&1` when capturing output in a file or a pipe.
+
+`warn` is accepted but currently logs exactly what `error` does; nothing in the
+tool logs at the warn level.
+
 ### Other Options
 
 | Flag | Short | Description |
@@ -339,199 +410,9 @@ http-assert version v0.1.0 (commit 4ffe282, built 2026-08-07T22:24:59Z, go1.25.5
 A binary built from a checkout rather than a release reports the commit it was
 built from instead of a tag.
 
-## Examples
+## Recipes
 
-### Basic Health Check
-
-```bash
-# Simple health check - assert 200 OK
-http-assert --assert-ok https://api.example.com/health
-```
-
-### POST Request with JSON Body
-
-```bash
-# POST with JSON data and assert specific status
-http-assert -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"username":"test","password":"secret"}' \
-  --assert-status 201 \
-  https://api.example.com/login
-```
-
-### Multiple Assertions
-
-```bash
-# Multiple assertions on the same request
-http-assert \
-  --assert-ok \
-  --assert-header-eq "Content-Type: application/json" \
-  --assert-jq '.status == "success"' \
-  https://api.example.com/status
-```
-
-### Header Validation
-
-```bash
-# Assert specific headers are present and have expected values
-http-assert \
-  --assert-header-eq "X-API-Version: v1" \
-  --assert-header-missing "X-Debug-Info" \
-  --assert-header "Cache-Control: max-age=\d+" \
-  https://api.example.com/data
-```
-
-### SSL and Security Testing
-
-```bash
-# Test with SSL verification disabled
-http-assert --insecure --assert-ok https://self-signed.example.com
-
-# Test with custom timeout
-http-assert --max-time 5 --assert-ok https://slow-api.example.com
-```
-
-### Host Mapping for Load Balancer Testing
-
-```bash
-# Map requests to specific backend servers
-http-assert \
-  --maphost "api.example.com:443=backend1.internal:8443" \
-  --assert-ok \
-  https://api.example.com/health
-
-# Test multiple backends
-http-assert \
-  --maphost "*:80=192.168.1.10" \
-  --assert-status 200 \
-  http://loadbalancer.example.com
-```
-
-### Redirect Testing
-
-```bash
-# Assert redirect to specific URL
-http-assert \
-  --assert-redirect-eq "https://new-domain.com/path" \
-  https://old-domain.com/path
-
-# Assert redirect matches pattern
-http-assert \
-  --assert-redirect "https://.*\.example\.com/.*" \
-  https://redirect.example.com
-
-# Note: URLs with query parameters should be quoted to avoid shell interpretation
-http-assert \
-  --assert-redirect-eq "https://example.com/target" \
-  "https://example.com/redirect?url=https://example.com/target"
-
-# Follow the chain instead, and assert on where it lands
-http-assert -L \
-  --assert-status 200 \
-  --assert-body '"status":\s*"ok"' \
-  https://old-domain.com/health
-
-# Cap the chain; exceeding the cap fails the run
-http-assert -L --max-redirs 2 --assert-ok https://old-domain.com/health
-```
-
-### Waiting for a Service to Become Healthy
-
-```bash
-# Poll once a second for half a minute, passing as soon as it answers
-http-assert --retry 30 --retry-delay 1s --assert-ok https://api.example.com/health
-
-# Bound the wait by the clock rather than by the number of attempts
-http-assert --retry 100 --retry-delay 2s --retry-max-time 1m \
-  --assert-status 200 https://api.example.com/health
-
-# Poll a local service quickly; each attempt gets 2s, the run gets 10s
-http-assert --max-time 2 --retry 50 --retry-delay 200ms --retry-max-time 10s \
-  --assert-ok http://localhost:8080/healthz
-```
-
-### Body Content Validation
-
-```bash
-# Assert exact body content
-http-assert \
-  --assert-body-eq "OK" \
-  https://api.example.com/ping
-
-# Assert body matches regex pattern
-http-assert \
-  --assert-body "\"users\":\s*\[\]" \
-  https://api.example.com/users
-
-# Assert empty response body
-http-assert \
-  --assert-body-empty \
-  https://api.example.com/delete-resource
-```
-
-### Environment Variables
-
-Six options can be set through the environment, using the `HTTP_ASSERT_` prefix with dashes replaced by underscores:
-
-| Variable | Equivalent flag |
-|----------|-----------------|
-| `HTTP_ASSERT_VERBOSE` | `--verbose` |
-| `HTTP_ASSERT_SILENT` | `--silent` |
-| `HTTP_ASSERT_LOG_LEVEL` | `--log-level` |
-| `HTTP_ASSERT_INSECURE` | `--insecure` |
-| `HTTP_ASSERT_MAX_TIME` | `--max-time` |
-| `HTTP_ASSERT_MAPHOST` | `--maphost` |
-
-```bash
-export HTTP_ASSERT_VERBOSE=true
-export HTTP_ASSERT_MAX_TIME=30
-export HTTP_ASSERT_INSECURE=true
-
-http-assert --assert-ok https://api.example.com
-```
-
-**Every option not in that table is command-line only.** `--request`, `--header`, `--data`, `--location`, `--max-redirs`, the three `--retry*` options and every `--assert-*` flag ignore the environment; setting `HTTP_ASSERT_REQUEST=POST` or `HTTP_ASSERT_RETRY=5` has no effect.
-
-**A command-line flag always wins over the environment**, which in turn wins over the built-in default. An empty variable counts as unset.
-
-#### Proxies
-
-`HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are honoured for the request itself. There is no flag for them, and no way to disable the behaviour from the command line — if one of these is set in your environment for unrelated reasons, requests go through it.
-
-**A value that does not parse is rejected** rather than ignored, so a typo cannot silently change behaviour:
-
-```console
-$ HTTP_ASSERT_MAX_TIME=abc http-assert --assert-ok https://api.example.com
-Error: Invalid value for HTTP_ASSERT_MAX_TIME="abc": strconv.ParseInt: parsing "abc": invalid syntax
-$ echo $?
-71
-```
-
-Booleans accept the Go forms (`true`, `false`, `1`, `0`, `t`, `f`, and their capitalisations); shell-style `yes`/`on` are rejected.
-
-**`HTTP_ASSERT_MAPHOST` separates multiple mappings with whitespace, not commas:**
-
-```bash
-# Two mappings
-export HTTP_ASSERT_MAPHOST="api.example.com:443=backend1:8443 api.example.com:80=backend1:8080"
-
-# NOT a list -- parsed as one malformed mapping, exits 71
-export HTTP_ASSERT_MAPHOST="api.example.com:443=backend1:8443,api.example.com:80=backend1:8080"
-```
-
-Repeating `--maphost` on the command line accumulates as usual.
-
-### Exit Codes
-
-- `0`: All assertions passed, or `--version`/`--help` was requested
-- `71`: A flag or environment value was rejected
-- `91`: The request could not be constructed from the method and URL
-- `93`: Failed to perform HTTP request, or at least one assertion failed
-- `103`: Wrong argument count, or an unknown flag
-
-## Use Cases
-
-### CI/CD Pipeline Integration
+### Deploy Gate
 
 ```bash
 #!/bin/bash
@@ -578,7 +459,22 @@ for endpoint in "${ENDPOINTS[@]}"; do
 done
 ```
 
-### Load Balancer Health Check
+### Checking Backends Behind a Load Balancer
+
+```bash
+# Map requests to specific backend servers
+http-assert \
+  --maphost "api.example.com:443=backend1.internal:8443" \
+  --assert-ok \
+  https://api.example.com/health
+
+# Test multiple backends
+http-assert \
+  --maphost "*:80=192.168.1.10" \
+  --assert-status 200 \
+  http://loadbalancer.example.com
+```
+
 
 ```bash
 # Test all backend servers through load balancer
@@ -593,3 +489,133 @@ for backend in "${BACKENDS[@]}"; do
     https://api.example.com/health
 done
 ```
+
+### POST with a JSON Body
+
+```bash
+# POST with JSON data; -d implies POST
+http-assert \
+  -H "Content-Type: application/json" \
+  -d '{"username":"test","password":"secret"}' \
+  --assert-status 201 \
+  https://api.example.com/login
+```
+
+### Header Validation
+
+```bash
+# Assert specific headers are present and have expected values
+http-assert \
+  --assert-header-eq "X-API-Version: v1" \
+  --assert-header-missing "X-Debug-Info" \
+  --assert-header "Cache-Control: max-age=\d+" \
+  https://api.example.com/data
+```
+
+## Reference
+
+### Environment Variables
+
+Six options can be set through the environment, using the `HTTP_ASSERT_` prefix with dashes replaced by underscores:
+
+| Variable | Equivalent flag |
+|----------|-----------------|
+| `HTTP_ASSERT_VERBOSE` | `--verbose` |
+| `HTTP_ASSERT_SILENT` | `--silent` |
+| `HTTP_ASSERT_LOG_LEVEL` | `--log-level` |
+| `HTTP_ASSERT_INSECURE` | `--insecure` |
+| `HTTP_ASSERT_MAX_TIME` | `--max-time` |
+| `HTTP_ASSERT_MAPHOST` | `--maphost` |
+
+```bash
+export HTTP_ASSERT_VERBOSE=true
+export HTTP_ASSERT_MAX_TIME=30
+export HTTP_ASSERT_INSECURE=true
+
+http-assert --assert-ok https://api.example.com
+```
+
+**Every option not in that table is command-line only.** `--request`, `--header`, `--data`, `--location`, `--max-redirs`, the three `--retry*` options and every `--assert-*` flag ignore the environment; setting `HTTP_ASSERT_REQUEST=POST` or `HTTP_ASSERT_RETRY=5` has no effect.
+
+**A command-line flag always wins over the environment**, which in turn wins over the built-in default. An empty variable counts as unset.
+
+#### Proxies
+
+`HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are honoured for the request itself. There is no flag for them, and no way to disable the behaviour from the command line: if one of these is set in your environment for unrelated reasons, requests go through it.
+
+**A value that does not parse is rejected** rather than ignored, so a typo cannot silently change behaviour:
+
+```console
+$ HTTP_ASSERT_MAX_TIME=abc http-assert --assert-ok https://api.example.com
+Error: Invalid value for HTTP_ASSERT_MAX_TIME="abc": strconv.ParseInt: parsing "abc": invalid syntax
+$ echo $?
+71
+```
+
+Booleans accept the Go forms (`true`, `false`, `1`, `0`, `t`, `f`, and their capitalisations); shell-style `yes`/`on` are rejected.
+
+**`HTTP_ASSERT_MAPHOST` separates multiple mappings with whitespace, not commas:**
+
+```bash
+# Two mappings
+export HTTP_ASSERT_MAPHOST="api.example.com:443=backend1:8443 api.example.com:80=backend1:8080"
+
+# NOT a list -- parsed as one malformed mapping, exits 71
+export HTTP_ASSERT_MAPHOST="api.example.com:443=backend1:8443,api.example.com:80=backend1:8080"
+```
+
+Repeating `--maphost` on the command line accumulates as usual.
+
+### Exit Codes
+
+- `0`: All assertions passed, or `--version`/`--help` was requested
+- `71`: A flag or environment value was rejected
+- `91`: The request could not be constructed from the method and URL
+- `93`: Failed to perform HTTP request, or at least one assertion failed
+- `103`: Wrong argument count, or an unknown flag
+
+### Coming from curl
+
+The flags follow `curl`'s names and semantics wherever that helps. The
+deviations are deliberate, each one a place where `curl`'s answer is wrong for
+a tool whose job is checking. This is the complete list:
+
+| | `curl` | `http-assert` |
+|---|---|---|
+| Redirects | not followed without `-L` | same default; `-L` additionally refuses to combine with `--assert-redirect*`, which need the 3xx it consumes |
+| `-H 'Name'` with no colon | removes the header | rejected, exit `71`; write `-H 'Name:'` to send an empty value |
+| `-d @file` | reads the file | sends the literal string `@file` |
+| `-d` repeated | values joined with `&` | rejected, exit `71` |
+| `--retry` | transport errors and a fixed set of transient statuses, exponential backoff | any failed attempt, assertion failures included, fixed delay |
+| Response decompression | opt-in via `--compressed` | always: gzip and deflate are decoded before assertions run |
+| Pointing at a backend | `--resolve host:port:addr` takes an address | `--maphost 'host:port=dst[:port]'` takes a hostname or an address |
+
+## License
+
+`http-assert` is free software, licensed under the GNU General Public License
+v3.0; see [LICENSE](LICENSE).
+
+## Development
+
+### Build from Repository
+
+```bash
+git clone https://github.com/korya/http-assert.git
+cd http-assert
+go build -o http-assert .
+```
+
+### Working on the Code
+
+[`just`](https://github.com/casey/just) is the task runner, and CI runs the
+same recipes:
+
+```bash
+just pre-commit   # build, tidy-check, vet, lint, gosec, unit tests, race
+just test-e2e     # end-to-end suite: builds the CLI and drives it as a subprocess
+just pre-push     # everything CI runs, including the end-to-end suite
+just test-cover   # merged unit + end-to-end coverage
+```
+
+The end-to-end tests are opt-in: `go test ./...` runs the unit tests only, and
+`-e2e` (or the recipes above) switches the full suite on.
