@@ -90,6 +90,33 @@ func Test_printPayload(t *testing.T) {
 			Output:       "",
 			CroppedBytes: 11,
 		},
+		// Whitespace is text. unicode.IsPrint rejects it, so testing that alone
+		// sent every body with a line break through the hex dumper.
+		{
+			CaseName: "multiple lines stay text",
+			Input:    []byte("line one\nline two\nline three"),
+			MaxSize:  100,
+			Output:   "line one\nline two\nline three",
+		},
+		{
+			CaseName: "pretty-printed JSON stays text",
+			Input:    []byte("{\n  \"ok\": true\n}"),
+			MaxSize:  100,
+			Output:   "{\n  \"ok\": true\n}",
+		},
+		{
+			CaseName: "tabs and carriage returns stay text",
+			Input:    []byte("a\tb\r\nc"),
+			MaxSize:  100,
+			Output:   "a\tb\r\nc",
+		},
+		{
+			CaseName: "a control byte among the whitespace is still binary",
+			Input:    []byte("line one\nline\x00two"),
+			MaxSize:  100,
+			Output: "00000000  6c 69 6e 65 20 6f 6e 65  0a 6c 69 6e 65 00 74 77  |line one.line.tw|\n" +
+				"00000010  6f                                                |o|\n",
+		},
 		{
 			CaseName: "single line, BIN, 100",
 			Input:    []byte("\x01single\x00line"),

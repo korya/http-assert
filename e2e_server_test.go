@@ -92,6 +92,12 @@ func testHandler() http.Handler {
 		write(w, http.StatusOK, []byte{0x00, 0x01, 0x02, 0x03, 0xff, 0xfe, 0x07, 0x08}, nil)
 	})
 
+	// A multi-line text body: the shape most real responses have, and the one
+	// that used to reach the hex dumper because '\n' is not unicode.IsPrint.
+	mux.HandleFunc("/multiline", func(w http.ResponseWriter, _ *http.Request) {
+		write(w, http.StatusOK, []byte("{\n  \"status\": \"success\"\n}"), nil)
+	})
+
 	// Flushes before the response buffer fills, which forces chunked transfer
 	// and leaves Content-Length unset. The failure dump must show the body
 	// without the framing that carried it (#18).

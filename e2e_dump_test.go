@@ -54,6 +54,15 @@ func TestE2EFailureDump(t *testing.T) {
 		}
 	})
 
+	// unicode.IsPrint answers false for '\n', so a body with a line break in it
+	// -- pretty-printed JSON, HTML, a log excerpt -- was shown as a hex dump.
+	t.Run("multi-line text body is shown as text", func(t *testing.T) {
+		r := run(t, nil, "--assert-body-eq", "never-matches", url("/multiline"))
+		assertExit(t, r, exitRequestFail)
+		assertContains(t, r, "\"status\": \"success\"")
+		assertNotContains(t, r, "00000000")
+	})
+
 	// Cropping is a property of the renderer, not of the transport, and has to
 	// survive the change.
 	t.Run("large body is still cropped and says so", func(t *testing.T) {

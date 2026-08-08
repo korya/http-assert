@@ -43,9 +43,22 @@ func printPayload(w io.Writer, bs []byte, maxSize int) (croppedBytes int) {
 	return
 }
 
+// isPrintable reports whether bs should be shown as text rather than dumped as
+// hex.
+//
+// Whitespace counts as text. unicode.IsPrint answers false for '\n', '\t' and
+// '\r', so testing it alone sent every multi-line body -- pretty-printed JSON,
+// HTML, a log excerpt, anything with a line break in the first 256 bytes -- to
+// the hex dumper, which is the least readable way to show text a human was
+// about to read.
+//
+// Known gap: bytes that are not valid UTF-8 decode to U+FFFD, which is itself
+// printable, so a body of high bytes still reads as text. Cropping happens
+// before this check and can split a multi-byte rune, so the obvious utf8.Valid
+// guard would misfile legitimate text; tracked separately.
 func isPrintable(bs []byte) bool {
 	nonPrintableIdx := bytes.IndexFunc(bs, func(r rune) bool {
-		return !unicode.IsPrint(r)
+		return !unicode.IsPrint(r) && !unicode.IsSpace(r)
 	})
 	return nonPrintableIdx < 0
 }
