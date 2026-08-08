@@ -100,13 +100,15 @@ func main() {
 	cmd.PersistentFlags().StringArray("maphost", nil,
 		"Provide a custom address for a specific host and port pair; "+
 			"e.g. <srchostname:srcport=dsthostname[:dstport]>")
-	cmd.PersistentFlags().BoolP("verbose", "v", false, "Be verbose; log info messages")
-	cmd.PersistentFlags().BoolP("silent", "s", false, "Be silent; log errors only")
+	cmd.PersistentFlags().BoolP("verbose", "v", false,
+		"Be verbose; log debug messages (same as --log-level debug)")
+	cmd.PersistentFlags().BoolP("silent", "s", false,
+		"Be silent; log error messages only (same as --log-level error)")
 	cmd.PersistentFlags().String("log-level", "",
 		"Set log level; possible values: debug, info (default), warn, error")
 	cmd.PersistentFlags().BoolP("insecure", "k", false, "Disable checking SSL certificates")
 	cmd.PersistentFlags().IntP("max-time", "m", 20,
-		"Maximum  time  in seconds that you allow each request to take")
+		"Maximum time in seconds that you allow each request to take")
 	cmd.Flags().StringP("request", "X", "GET", "Set method for HTTP request")
 	cmd.Flags().StringArrayP("header", "H", nil, "Set header for HTTP request")
 	cmd.Flags().StringP("data", "d", "",
@@ -254,17 +256,22 @@ func parseHostMappings(vals []string) ([]hostMapping, error) {
 
 func registerAssertionFlags(cmd *cobra.Command) {
 	cmd.Flags().Int("assert-status", 0, "Assert response status equals the provided value")
-	cmd.Flags().StringArray("assert-header", nil, "Assert header equals the provided regexp")
-	cmd.Flags().StringArray("assert-header-eq", nil, "Assert header equals the provided regexp")
+	cmd.Flags().StringArray("assert-header", nil,
+		"Assert header matches the provided regexp; NAME alone asserts it is present")
+	cmd.Flags().StringArray("assert-header-eq", nil,
+		"Assert header equals the provided value; NAME alone asserts it is present")
 	cmd.Flags().StringArray("assert-header-missing", nil, "Assert header is missing")
-	cmd.Flags().String("assert-body", "", "Assert body equals the provided value")
+	cmd.Flags().String("assert-body", "", "Assert body matches the provided regexp")
 	cmd.Flags().String("assert-body-eq", "", "Assert body equals the provided value")
 	cmd.Flags().Bool("assert-body-empty", false, "Assert body is empty")
 
 	// Common shorthands
-	cmd.Flags().Bool("assert-ok", false, "Assert response is successful (2xx)")
-	cmd.Flags().String("assert-redirect", "", "Assert response redirects to the provided URL")
-	cmd.Flags().String("assert-redirect-eq", "", "Assert response redirects to the provided URL")
+	cmd.Flags().Bool("assert-ok", false,
+		"Assert response status is not an error (2xx or 3xx)")
+	cmd.Flags().String("assert-redirect", "",
+		"Assert redirect location matches the provided regexp")
+	cmd.Flags().String("assert-redirect-eq", "",
+		"Assert redirect location equals the provided URL")
 }
 
 // mustCompileAssertion builds a pattern-based assertion, reporting an
