@@ -73,7 +73,7 @@ http-assert [flags] <URL>
 
 | Flag | Description |
 |------|-------------|
-| `--assert-ok` | Assert 2xx status code |
+| `--assert-ok` | Assert the status is not an error (2xx or 3xx) |
 | `--assert-status` | Assert specific status code |
 | `--assert-header` | Assert header matches regex pattern |
 | `--assert-header-eq` | Assert header equals exact value |
@@ -237,6 +237,10 @@ http-assert --assert-ok https://api.example.com
 **The remaining options are command-line only.** `--request`, `--header`, `--data` and every `--assert-*` flag ignore the environment; setting `HTTP_ASSERT_REQUEST=POST` has no effect.
 
 **A command-line flag always wins over the environment**, which in turn wins over the built-in default. An empty variable counts as unset.
+
+#### Proxies
+
+`HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are honoured for the request itself, through Go's standard proxy resolution. There is no flag for them, and no way to disable the behaviour from the command line — if one of these is set in your environment for unrelated reasons, requests go through it.
 
 **A value that does not parse is rejected** rather than ignored, so a typo cannot silently change behaviour:
 
