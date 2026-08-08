@@ -76,16 +76,6 @@ func TestKnownIssue20AssertOkAcceptsRedirects(t *testing.T) {
 	}
 }
 
-// TestKnownIssue22EmptyBodyEqualsNeverPasses: --assert-body-eq "" short-circuits
-// on an empty body and reports that the empty string is "missing".
-func TestKnownIssue22EmptyBodyEqualsNeverPasses(t *testing.T) {
-	characterizes(t, 22, `--assert-body-eq "" cannot pass, even against a 204`)
-
-	r := run(t, nil, "--assert-body-eq", "", url("/empty"))
-	assertExit(t, r, exitRequestFail)
-	assertContains(t, r, `body: expected "", missing`)
-}
-
 // TestKnownIssue23WildcardMaphostUnreachable: hostMapping.Matches handles "*"
 // and "*:*", but the parser rejects both, so the branches are dead code.
 func TestKnownIssue23WildcardMaphostUnreachable(t *testing.T) {
