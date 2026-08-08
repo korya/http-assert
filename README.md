@@ -86,6 +86,28 @@ http-assert [flags] <URL>
 
 The three header flags can be repeated to make several assertions of that kind. Every other assertion flag takes a single value; giving one twice exits `71` rather than silently keeping the last.
 
+### Redirects
+
+Redirects are not followed. A 3xx is delivered to the assertions exactly as it
+arrived, which is what makes `--assert-redirect` and `--assert-redirect-eq`
+possible at all -- a followed redirect has no `Location` header left to assert
+on.
+
+Callers arriving from `curl` should note that this is the opposite default.
+Combined with `--assert-ok` treating a 3xx as success, a redirecting endpoint
+passes a health check without the resource behind the redirect ever being
+fetched:
+
+```console
+$ http-assert --assert-ok https://old-domain.com/health
+[.] HTTP/1.1 GET https://old-domain.com/health
+[:] HTTP/1.1 301 Moved Permanently
+[+] PASSED 84ms
+```
+
+Assert the status you actually mean (`--assert-status 200`) when that is not
+what you wanted.
+
 ### Logging Options
 
 | Flag | Short | Description |
