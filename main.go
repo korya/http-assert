@@ -38,15 +38,16 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -496,21 +497,45 @@ type httpResponse struct {
 	BodyBytes []byte
 }
 
+// maxPayloadBytes is how much of a body the failure dump shows before cropping.
+const maxPayloadBytes = 256
+
+// writeTo renders the response for a person reading a failure report.
+//
+// Deliberately not http.Response.Write. That is a wire-format serializer: it
+// honours ContentLength and Transfer-Encoding, which describe the body that
+// arrived rather than the rendering that replaces it here. A placeholder or a
+// hex dump longer than the original body was cut to the original's length, and
+// a chunked response had its framing interleaved with the rendering (#18).
+//
+// Go reported the mismatch on every such run -- "http: ContentLength=4 with
+// Body length 26" -- and the caller discarded it. Nothing to discard now: the
+// bytes below are the whole output.
+//
+// Write errors are ignored, following utils.go, because every caller renders
+// into an in-memory strings.Builder that cannot fail.
 func (r httpResponse) writeTo(w io.Writer, withBody bool) {
-	// Ensure to close previous body
-	b := r.Body
-	defer func() { _ = b.Close() }()
-	if withBody {
-		var b bytes.Buffer
-		croppedBytes := printPayload(&b, r.BodyBytes, 256)
-		if croppedBytes > 0 {
-			fmt.Fprintf(&b, "\n\n  << Payload is cropped: %d bytes are hidden >>", croppedBytes)
-		}
-		r.Body = io.NopCloser(&b)
-	} else {
-		r.Body = io.NopCloser(strings.NewReader("  << Payload is omitted >>"))
+	_, _ = fmt.Fprintf(w, "%s %s\n", r.Proto, r.Status)
+	writeHeaders(w, r.Header)
+	_, _ = fmt.Fprintln(w)
+
+	if !withBody {
+		_, _ = fmt.Fprint(w, "  << Payload is omitted >>")
+		return
 	}
-	_ = r.Write(w)
+	if cropped := printPayload(w, r.BodyBytes, maxPayloadBytes); cropped > 0 {
+		_, _ = fmt.Fprintf(w, "\n\n  << Payload is cropped: %d bytes are hidden >>", cropped)
+	}
+}
+
+// writeHeaders renders headers one per line, sorted by name so that two dumps
+// of the same response can be compared.
+func writeHeaders(w io.Writer, h http.Header) {
+	for _, name := range slices.Sorted(maps.Keys(h)) {
+		for _, value := range h[name] {
+			_, _ = fmt.Fprintf(w, "%s: %s\n", name, value)
+		}
+	}
 }
 
 type hostMapping struct {

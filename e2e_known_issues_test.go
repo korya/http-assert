@@ -46,31 +46,6 @@ func TestIssue17BadPatternIsRejected(t *testing.T) {
 	})
 }
 
-// TestKnownIssue18PayloadTruncated: the response dump replaces the body with a
-// rendered form but leaves Content-Length untouched, so http.Response.Write
-// truncates whatever it renders to the original byte count.
-func TestKnownIssue18PayloadTruncated(t *testing.T) {
-	t.Run("silent mode truncates the placeholder", func(t *testing.T) {
-		characterizes(t, 18, "'<< Payload is omitted >>' is cut to the body's length")
-
-		// The body is "boom" (4 bytes), so only 4 bytes of the placeholder survive.
-		r := run(t, nil, "-s", "--assert-ok", url("/500"))
-		assertExit(t, r, exitRequestFail)
-		assertContains(t, r, "  <<")
-		assertNotContains(t, r, "Payload is omitted >>")
-	})
-
-	t.Run("binary body truncates the hex dump", func(t *testing.T) {
-		characterizes(t, 18, "an 8-byte binary body renders as a single hex offset")
-
-		r := run(t, nil, "--assert-body-eq", "never-matches", url("/binary"))
-		assertExit(t, r, exitRequestFail)
-		assertContains(t, r, "00000000")
-		// The real dump would carry the bytes and an ASCII gutter.
-		assertNotContains(t, r, "|")
-	})
-}
-
 // TestKnownIssue19RequestBodyMissing: the request is dumped after the transport
 // has drained its body, so Content-Length advertises bytes that are not shown.
 func TestKnownIssue19RequestBodyMissing(t *testing.T) {
