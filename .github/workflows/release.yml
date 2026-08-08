@@ -24,7 +24,7 @@ jobs:
         go-version-file: go.mod
 
     - name: Install just
-      uses: extractions/setup-just@v3
+      uses: extractions/setup-just@v4
 
     # A tag can be cut from any commit, not only one that master already proved
     # green. Twenty seconds here is cheaper than a published binary that does
