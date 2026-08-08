@@ -92,6 +92,16 @@ func testHandler() http.Handler {
 		write(w, http.StatusOK, []byte{0x00, 0x01, 0x02, 0x03, 0xff, 0xfe, 0x07, 0x08}, nil)
 	})
 
+	// Flushes before the response buffer fills, which forces chunked transfer
+	// and leaves Content-Length unset. The failure dump must show the body
+	// without the framing that carried it (#18).
+	mux.HandleFunc("/chunked", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("first chunk "))
+		w.(http.Flusher).Flush()
+		_, _ = w.Write([]byte("second chunk"))
+	})
+
 	// Larger than the 256-byte crop threshold used when printing payloads.
 	mux.HandleFunc("/big", func(w http.ResponseWriter, _ *http.Request) {
 		body := make([]byte, 5000)
