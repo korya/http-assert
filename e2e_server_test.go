@@ -166,6 +166,22 @@ func testHandler() http.Handler {
 		_ = conn.Close()
 	})
 
+	// A document with enough shape for jq to work on: an array to iterate, a
+	// nested object, and the three scalar types.
+	mux.HandleFunc("/json", func(w http.ResponseWriter, _ *http.Request) {
+		write(w, http.StatusOK, []byte(`{"status":"success","count":2,"active":true,`+
+			`"meta":{"version":"v1"},`+
+			`"users":[{"id":1,"name":"alice","active":true},`+
+			`{"id":2,"name":"bob","active":true}]}`),
+			http.Header{"Content-Type": {"application/json"}})
+	})
+
+	// Valid JSON served gzipped, so a jq assertion can be shown to run against
+	// the decoded payload rather than the bytes on the wire.
+	mux.HandleFunc("/json-gzip", func(w http.ResponseWriter, _ *http.Request) {
+		writeGzip(w, []byte(`{"status":"success","count":2}`))
+	})
+
 	// Two values under one header name, for the multi-value matching path.
 	mux.HandleFunc("/multi", func(w http.ResponseWriter, _ *http.Request) {
 		write(w, http.StatusOK, []byte("ok"), http.Header{"Set-Cookie": {"a=1", "b=2"}})

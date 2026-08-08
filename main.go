@@ -13,6 +13,11 @@
 // The two boolean assertions negate with =false, which selects the opposite
 // assertion rather than cancelling the flag.
 //
+// --assert-jq asserts a jq expression against a JSON body, and repeats like the
+// header assertions do. The expression yields the verdict itself, so there is
+// no path-and-value syntax and no question of whether 5 means the number or the
+// string -- jq already has types, comparison and regexp.
+//
 //	http-assert --assert-ok https://example.com
 //	http-assert --assert-status 201 -X POST -d '{"n":1}' https://api.example.com/things
 //	http-assert --assert-header 'Content-Type: application/json' \
@@ -90,6 +95,7 @@ import (
 	"compress/zlib"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -131,6 +137,10 @@ The two boolean assertions can be negated with =false, which selects the
 opposite assertion rather than cancelling the flag: --assert-ok=false asserts
 the status IS an error, and --assert-body-empty=false asserts the body is not
 empty.
+
+Repeat --assert-jq to assert several jq expressions against a JSON body. Each
+must yield true; a query that yields nothing has checked nothing and fails.
+A query is compiled before the request is made, so a broken one exits 71.
 
 Exit codes:
   0    every assertion passed
@@ -529,6 +539,8 @@ func registerAssertionFlags(cmd *cobra.Command) {
 	cmd.Flags().String("assert-body-eq", "", "Assert body equals the provided value")
 	cmd.Flags().Bool("assert-body-empty", false,
 		"Assert body is empty; =false asserts it is not")
+	cmd.Flags().StringArray("assert-jq", nil,
+		"Assert the jq expression yields true; repeat to assert several")
 
 	// Common shorthands
 	cmd.Flags().Bool("assert-ok", false,
@@ -671,6 +683,17 @@ func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 		v, _ := cmd.Flags().GetString("assert-body-eq")
 		res = append(res, AssertBodyEqual(v))
 	}
+
+	// One assertion per occurrence. --assert-jq is a stringArray, so rejectRepeats
+	// leaves it alone and repeating it accumulates, exactly as it does for the
+	// three header assertions.
+	if cmd.Flags().Changed("assert-jq") {
+		vs, _ := cmd.Flags().GetStringArray("assert-jq")
+		for _, v := range vs {
+			res = append(res, mustCompileAssertion("--assert-jq", v, AssertJQ))
+		}
+	}
+
 	return res
 }
 
@@ -1046,6 +1069,41 @@ type httpResponse struct {
 	// DecodeErr is why BodyBytes is still encoded. Nil means BodyBytes is the
 	// payload, whether or not anything had to be removed to get there.
 	DecodeErr error
+	// The decoded JSON body, filled by decodeJSON on first use. Plain fields
+	// rather than a sync.Once because httpResponse is passed around by value in
+	// places, and a value copy of a mutex is what go vet exists to catch.
+	jsonBody   any
+	jsonErr    error
+	jsonParsed bool
+}
+
+// decodeJSON decodes the body as JSON once and shares the result.
+//
+// Every --assert-jq in a run reads the same response, so ten queries should
+// parse it once rather than ten times. Failure is reported as a property of the
+// body, not of the query: a response that is not JSON fails every jq assertion
+// for the same reason, and saying so once per assertion is clearer than saying
+// the expression did not hold.
+func (r *httpResponse) decodeJSON() (any, error) {
+	if r.jsonParsed {
+		return r.jsonBody, r.jsonErr
+	}
+	r.jsonParsed = true
+
+	// Through bodyOf like every other body assertion, so a body that is still
+	// compressed reports that rather than reporting invalid JSON (#27).
+	body, err := bodyOf(r)
+	if err != nil {
+		r.jsonErr = err
+		return nil, r.jsonErr
+	}
+
+	if err := json.Unmarshal(body, &r.jsonBody); err != nil {
+		r.jsonErr = fmt.Errorf("body: expected JSON, got %s", err)
+		return nil, r.jsonErr
+	}
+
+	return r.jsonBody, nil
 }
 
 // decoders maps a Content-Encoding to something that removes it. Content

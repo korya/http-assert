@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"time"
+
+	"github.com/itchyny/gojq"
 )
 
 type Assertion func(res *httpResponse) error
@@ -133,6 +138,102 @@ func AssertBodyEmpty() Assertion {
 
 		return nil
 	}
+}
+
+// jqTimeout bounds the evaluation of one --assert-jq query.
+//
+// jq is a real language, so a query can simply never finish: `def f: f; f`
+// compiles cleanly and runs forever. Nothing else a caller can type makes this
+// program hang -- the request is bounded by --max-time, the retry loop by
+// --retry, and an --assert-body pattern cannot blow up because Go's regexp
+// engine is linear-time. This keeps that property rather than trading it away.
+//
+// It is not a budget for real work, and deliberately is not --max-time: that
+// bounds a request, and reusing it here would make a run take twice the number
+// the caller set. Measured queries finish in tens of microseconds, so ten
+// seconds is six orders of magnitude of headroom that no genuine assertion can
+// reach.
+const jqTimeout = 10 * time.Second
+
+// AssertJQ asserts that a jq expression holds against the response body.
+//
+// The expression yields the verdict itself rather than a path and an expected
+// value, which is what keeps this to one flag: jq already has types,
+// comparison and regexp, so there is no separator to invent, no ~= variant,
+// and no question of whether 5 means the number or the string.
+func AssertJQ(query string) (Assertion, error) {
+	q, err := gojq.Parse(query)
+	if err != nil {
+		return nil, err
+	}
+
+	// Compiled as well as parsed, because the two reject different things:
+	// `no_such_func(.)` and `. as $x | $y` are syntactically valid and fail
+	// only here. Catching them now is what makes a typo exit 71 against the
+	// flag rather than 93 in the middle of a run.
+	code, err := gojq.Compile(q)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(res *httpResponse) error {
+		return runJQ(code, query, res, jqTimeout)
+	}, nil
+}
+
+// runJQ evaluates one compiled query. The deadline is a parameter so the test
+// for it need not wait out the real one; every caller passes jqTimeout.
+func runJQ(code *gojq.Code, query string, res *httpResponse, timeout time.Duration) error {
+	doc, err := res.decodeJSON()
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	outputs := 0
+	it := code.RunWithContext(ctx, doc)
+	for {
+		v, ok := it.Next()
+		if !ok {
+			break
+		}
+		outputs++
+
+		// gojq reports a runtime failure as an error *value* in the output
+		// stream rather than as a Go error. Untyped it would read as "not
+		// true", turning a broken query into a failed assertion and
+		// sending the reader to inspect a service that answered correctly.
+		if e, isErr := v.(error); isErr {
+			return fmt.Errorf("jq[%s]: %s", query, e)
+		}
+
+		if b, isBool := v.(bool); !isBool || !b {
+			return fmt.Errorf("jq[%s]: expected true, got %s", query, jqValue(v))
+		}
+	}
+
+	// A query that matched nothing checked nothing. Reporting that as a
+	// pass is the one outcome this program exists to refuse, and it is
+	// reachable by accident: `.users[] | select(.id == 99) | .active`
+	// yields no output at all when no user has that id.
+	if outputs == 0 {
+		return fmt.Errorf("jq[%s]: expected true, got no output", query)
+	}
+
+	return nil
+}
+
+// jqValue renders a query's output for the failure message. jq's own notation
+// is JSON, so this is what `jq` would have printed for the same expression.
+func jqValue(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+
+	return string(b)
 }
 
 func AssertBodyNotEmpty() Assertion {
