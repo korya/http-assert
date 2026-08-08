@@ -10,7 +10,7 @@ A command-line tool for performing HTTP requests and asserting properties of the
 - **CI/CD pipelines**: Validate deployed services before proceeding with deployment
 - **Integration testing**: Test HTTP endpoints with various assertion conditions
 - **Load balancer testing**: Use host mapping to test different backend servers
-- **SSL/TLS validation**: Test secure endpoints with certificate validation options
+- **Self-signed and internal endpoints**: `--insecure` reaches hosts that cannot present a verifiable certificate
 
 ## Installation
 
@@ -20,6 +20,7 @@ No Go toolchain required. Static binaries for Linux, macOS and Windows on
 amd64 and arm64 are attached to every [release](https://github.com/korya/http-assert/releases).
 
 ```bash
+# Pick the latest tag from https://github.com/korya/http-assert/releases
 VERSION=v0.1.0
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
@@ -94,7 +95,7 @@ A `-H` value needs a colon. A bare name exits `71` rather than being sent as a h
 | `--assert-redirect` | Assert redirect location matches regex |
 | `--assert-redirect-eq` | Assert redirect location equals exact value |
 
-The three header flags can be repeated to make several assertions of that kind. Every other assertion flag takes a single value; giving one twice exits `71` rather than silently keeping the last.
+The three header flags and `--assert-jq` can be repeated to make several assertions of that kind. Every other assertion flag takes a single value; giving one twice exits `71` rather than silently keeping the last.
 
 `--assert-ok` and `--assert-body-empty` can be negated with `=false`, which asserts the opposite rather than cancelling the flag:
 
@@ -166,10 +167,8 @@ exactly as it arrived, which is what makes `--assert-redirect` and
 `--assert-redirect-eq` possible at all -- a followed redirect has no `Location`
 header left to assert on.
 
-Callers arriving from `curl` should note that this is the opposite default.
-Combined with `--assert-ok` treating a 3xx as success, a redirecting endpoint
-passes a health check without the resource behind the redirect ever being
-fetched:
+`--assert-ok` treats a 3xx as success, so a redirecting endpoint passes a
+health check without the resource behind the redirect ever being fetched:
 
 ```console
 $ http-assert --assert-ok https://old-domain.com/health
@@ -293,10 +292,9 @@ http-assert \
   https://api.example.com/
 ```
 
-**Nothing is advertised in `Accept-Encoding` unless you ask for it.** `curl`
-sends the header on your behalf; this does not, so a server that compresses only
-on request will answer in plain. Ask with `-H` when you want to exercise content
-negotiation.
+**Nothing is advertised in `Accept-Encoding` unless you ask for it.** A server
+that compresses only on request will answer in plain; ask with
+`-H 'Accept-Encoding: gzip'` when you want to exercise content negotiation.
 
 **An encoding with no decoder here fails only the body assertions**, naming
 itself, and leaves the rest of the run intact:
@@ -323,6 +321,9 @@ way. Reading those bytes as plain text would be its own silent corruption.
 | `--verbose` | `-v` | Enable verbose logging |
 | `--silent` | `-s` | Only log errors |
 | `--log-level` | | Set log level (debug, info, warn, error) |
+
+`warn` is accepted but currently logs exactly what `error` does; nothing in the
+tool logs at the warn level.
 
 ### Other Options
 
@@ -351,8 +352,8 @@ http-assert --assert-ok https://api.example.com/health
 ### POST Request with JSON Body
 
 ```bash
-# POST with JSON data and assert specific status
-http-assert -X POST \
+# POST with JSON data; -d implies POST
+http-assert \
   -H "Content-Type: application/json" \
   -d '{"username":"test","password":"secret"}' \
   --assert-status 201 \

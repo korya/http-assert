@@ -6,9 +6,9 @@
 // declared as flags, and the request is made once and checked against all of
 // them.
 //
-// The three header assertions can be repeated to assert several things at
-// once. Every other assertion flag takes a single value and is rejected if
-// given twice, rather than quietly keeping the last one.
+// The three header assertions and --assert-jq can be repeated to assert
+// several things at once. Every other assertion flag takes a single value and
+// is rejected if given twice, rather than quietly keeping the last one.
 //
 // The two boolean assertions negate with =false, which selects the opposite
 // assertion rather than cancelling the flag.
@@ -129,9 +129,10 @@ func main() {
 Assertions are declared as flags. The request is made once and checked
 against all of them, and every failure is reported, not just the first.
 
-Repeat --assert-header, --assert-header-eq or --assert-header-missing to make
-several assertions of that kind. Every other assertion flag takes a single
-value and is rejected if given twice, rather than quietly keeping the last.
+Repeat --assert-header, --assert-header-eq, --assert-header-missing or
+--assert-jq to make several assertions of that kind. Every other assertion flag
+takes a single value and is rejected if given twice, rather than quietly
+keeping the last.
 
 The two boolean assertions can be negated with =false, which selects the
 opposite assertion rather than cancelling the flag: --assert-ok=false asserts
@@ -167,9 +168,8 @@ Redirects:
   not followed. That is what --assert-redirect and --assert-redirect-eq
   assert against.
 
-  This is the opposite of curl's default, and --assert-ok counts a 3xx as
-  success, so a redirecting endpoint passes a health check without the
-  resource behind it ever being fetched.
+  --assert-ok counts a 3xx as success, so a redirecting endpoint passes a
+  health check without the resource behind it ever being fetched.
 
   -L follows the chain, and every assertion then applies to the response at
   the end of it. --max-redirs bounds the chain and needs -L to mean anything.
