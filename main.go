@@ -50,6 +50,21 @@
 // response at the end of it. --max-redirs bounds the chain. Because following
 // consumes the 3xx, --location and the two redirect assertions are mutually
 // exclusive rather than merely unusual together.
+//
+// # Retries
+//
+// --retry re-sends the request after a failed attempt, waiting --retry-delay
+// between them. A failure is any failure: a transport error, or an assertion
+// that did not hold. Waiting for a service to come up is the case this exists
+// for, and there the response arrives perfectly well and says the wrong thing.
+//
+// The delay is fixed rather than exponential, so --retry 30 --retry-delay 1s
+// reads as "poll once a second for thirty seconds" and the worst case can be
+// worked out without a calculator.
+//
+// --max-time bounds each attempt; --retry-max-time bounds the whole run. The
+// latter is checked before each retry, so an attempt already in flight can
+// overrun it by up to one --max-time.
 package main
 
 import (
@@ -124,9 +139,23 @@ Redirects:
   -L follows the chain, and every assertion then applies to the response at
   the end of it. --max-redirs bounds the chain and needs -L to mean anything.
   -L cannot be combined with --assert-redirect or --assert-redirect-eq: the
-  3xx those inspect is the very thing -L consumes.`,
+  3xx those inspect is the very thing -L consumes.
+
+Retries:
+  --retry re-sends the request after a failed attempt, waiting --retry-delay
+  between them (1s by default, and fixed rather than exponential). A failure is
+  any failure: a transport error, or an assertion that did not hold. Waiting
+  for a service to come up is what this is for, and there the response arrives
+  perfectly well and says the wrong thing.
+
+  -m bounds each attempt, not the run. --retry-max-time bounds the run and is
+  checked before each retry, so an attempt already in flight can overrun it.
+  Both --retry-delay and --retry-max-time need --retry to mean anything.`,
 		Example: `  # A health check: any non-error status passes
   http-assert --assert-ok https://example.com/health
+
+  # Wait for a service to come up, polling once a second for half a minute
+  http-assert --retry 30 --retry-delay 1s --assert-ok https://example.com/health
 
   # Exact status plus a body pattern
   http-assert --assert-status 201 --assert-body '"id":\s*[0-9]+' https://example.com/things
@@ -144,6 +173,9 @@ Redirects:
 			maphost, _ := cmd.Flags().GetStringArray("maphost")
 			location, _ := cmd.Flags().GetBool("location")
 			maxRedirs, _ := cmd.Flags().GetInt("max-redirs")
+			retry, _ := cmd.Flags().GetInt("retry")
+			retryDelay, _ := cmd.Flags().GetDuration("retry-delay")
+			retryMaxTime, _ := cmd.Flags().GetDuration("retry-max-time")
 			c := Client{
 				LogLevel:        mustParseLogLevel(cmd),
 				SkipSslChecks:   insecure,
@@ -151,6 +183,9 @@ Redirects:
 				HostMappings:    mustParseHostMappings(maphost),
 				FollowRedirects: location,
 				MaxRedirects:    maxRedirs,
+				Retries:         retry,
+				RetryDelay:      retryDelay,
+				RetryMaxTime:    retryMaxTime,
 			}
 			c.Init()
 
@@ -197,6 +232,12 @@ Redirects:
 		"Follow redirects; assertions then apply to the end of the chain")
 	cmd.Flags().Int("max-redirs", 10,
 		"Maximum number of redirects to follow; requires --location")
+	cmd.Flags().Int("retry", 0,
+		"Number of times to retry a failed attempt; 0 makes the request once")
+	cmd.Flags().Duration("retry-delay", time.Second,
+		"Fixed delay between attempts, e.g. 1s or 250ms; requires --retry")
+	cmd.Flags().Duration("retry-max-time", 0,
+		"Stop retrying after this long; 0 means only --retry bounds it; requires --retry")
 	registerAssertionFlags(cmd)
 	rejectRepeats(cmd.Flags())
 
@@ -206,6 +247,7 @@ Redirects:
 		checkRepeats(cmd.Flags())
 		applyEnv(cmd.Flags())
 		checkRedirectFlags(cmd.Flags())
+		checkRetryFlags(cmd.Flags())
 	}
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -287,6 +329,38 @@ func checkRedirectFlags(fs *pflag.FlagSet) {
 	if n, _ := fs.GetInt("max-redirs"); n < 0 {
 		dief(71, "Invalid value for --max-redirs flag: %d; it counts redirects, "+
 			"so the smallest meaningful value is 0", n)
+	}
+}
+
+// checkRetryFlags rejects the ways the retry options can be asked for something
+// they cannot deliver, on the same grounds as checkRedirectFlags above.
+//
+// The two durations are inert without --retry, exactly as --max-redirs is inert
+// without --location: a value nobody will read. The negative cases are worse
+// than inert, because pflag accepts a negative duration without complaint --
+// --retry-delay=-2s parses fine and then never waits.
+//
+// The test for the durations is whether --retry was named, not what it was set
+// to. `--retry ${RETRIES:-0} --retry-delay 1s` is an ordinary shape for a
+// script, and refusing it would break a caller who did nothing wrong.
+func checkRetryFlags(fs *pflag.FlagSet) {
+	if n, _ := fs.GetInt("retry"); n < 0 {
+		dief(71, "Invalid value for --retry flag: %d; it counts retries, so the "+
+			"smallest meaningful value is 0", n)
+	}
+
+	for _, name := range []string{"retry-delay", "retry-max-time"} {
+		if !fs.Changed(name) {
+			continue
+		}
+		if !fs.Changed("retry") {
+			dief(71, "Flag --%s configures retrying that is not switched on; "+
+				"pass --retry, or drop --%s", name, name)
+		}
+		if d, _ := fs.GetDuration(name); d < 0 {
+			dief(71, "Invalid value for --%s flag: %s; it is a length of time, "+
+				"so the smallest meaningful value is 0", name, d)
+		}
 	}
 }
 
@@ -555,6 +629,18 @@ type Client struct {
 	// MaxRedirects bounds the chain. Zero refuses every redirect; it is only
 	// read when FollowRedirects is set.
 	MaxRedirects int
+	// Retries is how many further attempts may follow a failed one. Zero makes
+	// the request once, which is the default and the behaviour that predates
+	// retrying.
+	Retries int
+	// RetryDelay is the fixed wait between attempts. Only read when Retries is
+	// positive.
+	RetryDelay time.Duration
+	// RetryMaxTime bounds the whole run, measured from the first attempt. Zero
+	// means only Retries bounds it. It is checked before each retry rather than
+	// enforced mid-flight, so an attempt already under way can overrun it by up
+	// to one Timeout -- which is curl's meaning for the same option.
+	RetryMaxTime time.Duration
 }
 
 func (c *Client) Init() {
@@ -572,10 +658,73 @@ func (c *Client) Init() {
 // matching on net/http's message text would be a promise net/http never made.
 var errTooManyRedirects = errors.New("too many redirects")
 
+// Do makes the request and checks the response against every assertion,
+// retrying a failed attempt up to Retries times.
+//
+// Any failure is retried, an unreachable host and a wrong answer alike. The
+// case retrying exists for is waiting for a service to come up, and there the
+// response usually arrives perfectly well and says the wrong thing, so a rule
+// that retried only transport errors would miss the whole point.
 func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 	if len(assertions) == 0 {
+		// Not a failed attempt but a malformed invocation, so it is reported
+		// once rather than retried into the ground.
 		return fmt.Errorf("no assertions defined")
 	}
+
+	// Built once rather than per attempt: an http.Transport owns an idle
+	// connection pool, and a fresh one per attempt would leave --retry 100 of
+	// them behind for the lifetime of the process.
+	client := c.getHttpClient()
+	startedAt := time.Now()
+
+	for attempt := 1; ; attempt++ {
+		err := c.doOnce(client, req, assertions)
+		if err == nil {
+			return nil
+		}
+
+		switch {
+		case attempt > c.Retries:
+			return c.giveUp(attempt, "", err)
+		// Checked before sleeping rather than after, so the run ends at the
+		// budget instead of one delay past it.
+		case c.RetryMaxTime > 0 && time.Since(startedAt)+c.RetryDelay > c.RetryMaxTime:
+			return c.giveUp(attempt, "--retry-max-time is "+c.RetryMaxTime.String(), err)
+		}
+
+		c.logInfo("[~] retry %d/%d in %s\n", attempt, c.Retries, c.RetryDelay)
+		time.Sleep(c.RetryDelay)
+	}
+}
+
+// giveUp reports the last failure together with how the run ended.
+//
+// Without the prefix a CI log shows a single failed attempt and no sign that
+// five more happened, which reads as a service that was never up rather than
+// one that never came up. Nothing is added when nothing was retried, so a plain
+// run says exactly what it always said.
+func (c Client) giveUp(attempts int, limit string, err error) error {
+	if c.Retries <= 0 {
+		return err
+	}
+
+	if limit != "" {
+		limit = " (" + limit + ")"
+	}
+	return fmt.Errorf("gave up after %d attempts%s:\n%w", attempts, limit, err)
+}
+
+// doOnce performs one request and checks it against every assertion.
+func (c Client) doOnce(client *http.Client, req *http.Request, assertions []Assertion) error {
+	next, err := cloneForAttempt(req)
+	if err != nil {
+		var b strings.Builder
+		fmt.Fprintf(&b, "failed to rewind the request body:\n- %s\n", err)
+		c.writeHttpDetails(&b, req, nil)
+		return errors.New(b.String())
+	}
+	req = next
 
 	c.logInfo("[.] %s %s %s", req.Proto, req.Method, req.URL)
 	startedAt := time.Now()
@@ -587,7 +736,7 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 	// the server, not the operator. It stays opt-in for exactly that reason,
 	// and net/http drops Authorization and Cookie when a hop leaves the
 	// original domain, so credentials passed with -H do not travel.
-	res, err := c.getHttpClient().Do(req) // #nosec G704 - user asked for this URL
+	res, err := client.Do(req) // #nosec G704 - user asked for this URL
 	if err != nil {
 		var b strings.Builder
 		// The transport did its job here; this program stopped the chain.
@@ -597,6 +746,12 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 			fmt.Fprintf(&b, "redirect chain was not followed to the end:\n- %s\n", err)
 		} else {
 			fmt.Fprintf(&b, "failed to send request:\n- %s\n", err)
+		}
+		// This path logs nothing between [.] and the dump the caller prints,
+		// which is fine for a single attempt and unreadable for twenty. The
+		// line appears only while retrying so that a plain run is untouched.
+		if c.Retries > 0 {
+			c.logInfo("[-] FAILED %s: %s\n", time.Since(startedAt), err)
 		}
 		c.writeHttpDetails(&b, req, nil)
 		return errors.New(b.String())
@@ -627,6 +782,31 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) error {
 
 	c.logInfo("[+] PASSED %s\n\n", time.Since(startedAt))
 	return nil
+}
+
+// cloneForAttempt returns a request that can be sent even if the one it was
+// built from already has been.
+//
+// http.Client consumes and closes req.Body, so re-sending the same *http.Request
+// carries an empty body unless net/http can replay it through GetBody. Today it
+// can -- the CLI builds the body from a strings.Reader, which is one of the
+// three types http.NewRequest recognises -- but that is a property of the body
+// type rather than a guarantee, and a body without GetBody would silently send
+// nothing on the second attempt. Cloning costs six lines and does not depend on
+// which reader the caller happened to pass.
+func cloneForAttempt(req *http.Request) (*http.Request, error) {
+	res := req.Clone(req.Context())
+	if req.GetBody == nil {
+		return res, nil // no body, or http.NoBody, which re-reads as empty
+	}
+
+	body, err := req.GetBody()
+	if err != nil {
+		return nil, err
+	}
+	res.Body = body
+
+	return res, nil
 }
 
 func (c Client) writeHttpDetails(w io.Writer, req *http.Request, res *httpResponse) {

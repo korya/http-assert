@@ -15,7 +15,7 @@ import (
 // the two sources is covered separately by TestE2EConfigPrecedence.
 //
 // EnvSupported records what the tool does *today*, not what it should do. Only
-// 6 of the 21 options honour the environment; the other 15 silently ignore it
+// 6 of the 24 options honour the environment; the other 18 silently ignore it
 // (#54 proposes making this uniform). When that lands, flip those booleans --
 // the diff is the proof the change did what it claimed.
 
@@ -141,6 +141,34 @@ func configCases(t *testing.T) []configCase {
 			},
 		},
 
+		{
+			Flag: "retry", CLI: []string{"--retry", "1"},
+			EnvKey: "HTTP_ASSERT_RETRY", EnvVal: "1", EnvSupported: false, Issue: 54,
+			// A permanently failing endpoint, so the run is decided by whether a
+			// second attempt happened at all rather than by what it returned.
+			Base:    []string{"--assert-ok", url("/500")},
+			Applied: func(r result) bool { return strings.Contains(r.Output(), "[~] retry ") },
+		},
+		{
+			Flag: "retry-delay", CLI: []string{"--retry-delay", "50ms"},
+			EnvKey: "HTTP_ASSERT_RETRY_DELAY", EnvVal: "50ms", EnvSupported: false, Issue: 54,
+			// The delay is announced before it is waited out, which is the only
+			// way to observe the value without timing the process. --retry lives
+			// in Base because the option is not accepted without it.
+			Base:    []string{"--retry", "1", "--assert-ok", url("/500")},
+			Applied: func(r result) bool { return strings.Contains(r.Output(), "in 50ms") },
+		},
+		{
+			Flag: "retry-max-time", CLI: []string{"--retry-max-time", "1ms"},
+			EnvKey: "HTTP_ASSERT_RETRY_MAX_TIME", EnvVal: "1ms", EnvSupported: false, Issue: 54,
+			// A budget too small for even one delay, so it always wins over the
+			// count -- and the message names whichever bound ended the run.
+			Base: []string{"--retry", "3", "--retry-delay", "50ms", "--assert-ok", url("/500")},
+			Applied: func(r result) bool {
+				return strings.Contains(r.Output(), "--retry-max-time is 1ms")
+			},
+		},
+
 		// ---- assertion options: all cobra-only ----
 		assertion("assert-ok", []string{"--assert-ok"}, "HTTP_ASSERT_ASSERT_OK", okURL),
 		assertion("assert-status", []string{"--assert-status", "200"}, "HTTP_ASSERT_ASSERT_STATUS", okURL),
@@ -159,7 +187,7 @@ func TestE2EConfigContract(t *testing.T) {
 	cases := configCases(t)
 
 	// Guards against an option being added to the CLI and quietly skipped here.
-	if got, want := len(cases), 21; got != want {
+	if got, want := len(cases), 24; got != want {
 		t.Fatalf("config matrix covers %d options, want %d -- add the new flag to configCases", got, want)
 	}
 
@@ -182,7 +210,7 @@ func TestE2EConfigContract(t *testing.T) {
 			t.Run("env", func(t *testing.T) {
 				if !tc.EnvSupported {
 					characterizes(t, tc.Issue,
-						tc.EnvKey+" is ignored; only 6 of 21 options read the environment")
+						tc.EnvKey+" is ignored; only 6 of 24 options read the environment")
 				}
 				r := run(t, map[string]string{tc.EnvKey: tc.EnvVal}, tc.Base...)
 				if got := tc.Applied(r); got != tc.EnvSupported {
