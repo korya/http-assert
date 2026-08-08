@@ -39,6 +39,12 @@
 // The remaining options are command-line only. Repeatable options split one
 // variable on whitespace, which suits host mappings and would corrupt header
 // values.
+//
+// # Redirects
+//
+// Redirects are not followed. A 3xx reaches the assertions as it stands, which
+// is the only reason --assert-redirect and --assert-redirect-eq can work: a
+// followed redirect leaves no Location header behind to assert on.
 package main
 
 import (
@@ -99,7 +105,15 @@ Environment:
   rather than quietly replaced by a zero.
 
   HTTP_PROXY, HTTPS_PROXY and NO_PROXY are honoured for the request itself.
-  There is no flag for them.`,
+  There is no flag for them.
+
+Redirects:
+  A 3xx response is asserted on as it stands; the redirect is not followed.
+  That is what --assert-redirect and --assert-redirect-eq assert against.
+
+  This is the opposite of curl's default, and --assert-ok counts a 3xx as
+  success, so a redirecting endpoint passes a health check without the
+  resource behind it ever being fetched.`,
 		Example: `  # A health check: any non-error status passes
   http-assert --assert-ok https://example.com/health
 
@@ -321,9 +335,9 @@ func registerAssertionFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("assert-ok", false,
 		"Assert response status is not an error (2xx or 3xx)")
 	cmd.Flags().String("assert-redirect", "",
-		"Assert redirect location matches the provided regexp")
+		"Assert redirect location matches the provided regexp; redirects are not followed")
 	cmd.Flags().String("assert-redirect-eq", "",
-		"Assert redirect location equals the provided URL")
+		"Assert redirect location equals the provided URL; redirects are not followed")
 }
 
 // singleValue wraps a flag that holds one value, counting how many times the
