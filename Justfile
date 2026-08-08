@@ -10,8 +10,11 @@ build:
 build-release:
     go build -ldflags="-s -w" -o http-assert .
 
+[doc("Run every platform-independent check: build, tidy, config, vet, lint, security")]
+static-checks: build tidy-check lint-config-check vet lint security
+
 [doc("Run all pre-commit checks")]
-pre-commit: build tidy-check lint-config-check vet lint test test-race security
+pre-commit: static-checks test test-race
 
 [doc("Build and check compilation without creating binary")]
 check:
