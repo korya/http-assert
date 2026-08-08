@@ -264,8 +264,10 @@ Repeating `--maphost` on the command line accumulates as usual.
 ### Exit Codes
 
 - `0`: All assertions passed, or `--version`/`--help` was requested
-- `93`: Failed to perform HTTP request or assertions failed
-- `103`: Invalid command line arguments or other errors
+- `71`: A flag or environment value failed to parse
+- `91`: The request could not be constructed from the method and URL
+- `93`: Failed to perform HTTP request, or at least one assertion failed
+- `103`: Wrong argument count, or an unknown flag
 
 ## Use Cases
 
