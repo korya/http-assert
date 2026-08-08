@@ -37,6 +37,14 @@ tar xzf "$ARCHIVE" http-assert
 The binary is statically linked, so it drops straight into a `scratch` or
 `distroless` image with `COPY --from`.
 
+### Shell Completion
+
+Completion scripts for bash, zsh, fish and PowerShell are built in:
+
+```bash
+http-assert completion zsh --help   # per-shell install instructions
+```
+
 ### From Source
 
 ```bash
@@ -59,6 +67,9 @@ go build -o http-assert .
 http-assert [flags] <URL>
 ```
 
+At least one `--assert-*` flag is required; a run with no assertions exits `93`
+rather than reporting a success it never checked.
+
 ### Request Options
 
 | Flag | Short | Description |
@@ -79,14 +90,16 @@ A `-H` value needs a colon. A bare name exits `71` rather than being sent as a h
 
 `-d` follows `curl`: the method becomes POST unless `-X` says otherwise, and `Content-Type: application/x-www-form-urlencoded` is set unless a `-H` provides one (`-H 'Content-Type:'` counts as providing one). Two deviations remain: `-d @file` sends the literal string `@file` rather than reading the file, and a repeated `-d` is rejected rather than joined with `&`.
 
+`--max-time` takes whole seconds; the three `--retry-*` options take durations with a unit (`1s`, `250ms`, `2m`). Requests are made over HTTP/1.1 — HTTP/2 is never attempted.
+
 ### Assertion Options
 
 | Flag | Description |
 |------|-------------|
 | `--assert-ok` | Assert the status is not an error (2xx or 3xx) |
 | `--assert-status` | Assert specific status code |
-| `--assert-header` | Assert header matches regex pattern |
-| `--assert-header-eq` | Assert header equals exact value |
+| `--assert-header` | Assert header matches regex pattern; a name alone asserts presence |
+| `--assert-header-eq` | Assert header equals exact value; a name alone asserts presence |
 | `--assert-header-missing` | Assert header is not present |
 | `--assert-body` | Assert body matches regex pattern |
 | `--assert-body-eq` | Assert body equals exact value |
@@ -321,6 +334,13 @@ way. Reading those bytes as plain text would be its own silent corruption.
 | `--verbose` | `-v` | Enable verbose logging |
 | `--silent` | `-s` | Only log errors |
 | `--log-level` | | Set log level (debug, info, warn, error) |
+
+**Everything the tool prints goes to stderr; stdout is always empty.** Use
+`2>&1` when capturing output in a file or a pipe.
+
+Each log line is prefixed with a sigil: `[.]` request sent, `[>]` redirect
+followed, `[:]` response received, `[~]` waiting to retry, and `[+]`/`[-]` for
+the verdict.
 
 `warn` is accepted but currently logs exactly what `error` does; nothing in the
 tool logs at the warn level.
@@ -594,3 +614,8 @@ for backend in "${BACKENDS[@]}"; do
     https://api.example.com/health
 done
 ```
+
+## License
+
+`http-assert` is free software, licensed under the GNU General Public License
+v3.0 — see [LICENSE](LICENSE).
