@@ -299,7 +299,7 @@ export HTTP_ASSERT_INSECURE=true
 http-assert --assert-ok https://api.example.com
 ```
 
-**The remaining options are command-line only.** `--request`, `--header`, `--data` and every `--assert-*` flag ignore the environment; setting `HTTP_ASSERT_REQUEST=POST` has no effect.
+**Every option not in that table is command-line only.** `--request`, `--header`, `--data`, `--location`, `--max-redirs` and every `--assert-*` flag ignore the environment; setting `HTTP_ASSERT_REQUEST=POST` has no effect.
 
 **A command-line flag always wins over the environment**, which in turn wins over the built-in default. An empty variable counts as unset.
 
