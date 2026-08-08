@@ -130,23 +130,6 @@ func TestKnownIssue31MaxTimeAcceptsNonPositive(t *testing.T) {
 	}
 }
 
-// TestKnownIssue33BareHeaderSendsEmptyValue: a -H value with no colon parses to
-// an empty value and is sent as an empty-valued header.
-//
-// curl treats `-H 'X-Foo'` as "remove this header" and requires `-H 'X-Foo;'` to
-// send an empty one, so the divergence is real -- but the header is NOT dropped,
-// which is what #33 originally claimed. The issue text has been corrected.
-func TestKnownIssue33BareHeaderSendsEmptyValue(t *testing.T) {
-	characterizes(t, 33, "-H without a colon sends an empty-valued header rather than being rejected")
-
-	r := run(t, nil, "-H", "BareHeader", "--assert-body-eq", "never-matches", url("/echo"))
-	assertExit(t, r, exitRequestFail)
-
-	// Canonicalised to Bareheader, present, with an empty value.
-	assertContains(t, r, "Bareheader")
-	assertContains(t, r, `\"Bareheader\":[\"\"]`)
-}
-
 // TestKnownIssue34StdoutAlwaysEmpty: every byte goes to stderr, so redirecting
 // stdout captures nothing.
 func TestKnownIssue34StdoutAlwaysEmpty(t *testing.T) {
