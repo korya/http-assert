@@ -250,3 +250,48 @@ func TestE2EAssertEmptyBody(t *testing.T) {
 		assertContains(t, r, `body: expected "value", missing`)
 	})
 }
+
+// TestE2EAssertBooleanNegation pins what =false means on the two boolean
+// assertions. It used to mean two different things: --assert-ok=false selected
+// the inverse assertion, while --assert-body-empty=false selected none at all
+// and killed the run with "no assertions defined" (#32).
+func TestE2EAssertBooleanNegation(t *testing.T) {
+	for _, tc := range []struct {
+		Name string
+		Args []string
+		Want int
+	}{
+		// --assert-ok, both directions, both outcomes.
+		{"--assert-ok on a 200", []string{"--assert-ok", url("/ok")}, exitOK},
+		{"--assert-ok on a 500", []string{"--assert-ok", url("/500")}, exitRequestFail},
+		{"--assert-ok=false on a 500", []string{"--assert-ok=false", url("/500")}, exitOK},
+		{"--assert-ok=false on a 200", []string{"--assert-ok=false", url("/ok")}, exitRequestFail},
+
+		// --assert-body-empty, the same four.
+		{"--assert-body-empty on a 204", []string{"--assert-body-empty", url("/empty")}, exitOK},
+		{"--assert-body-empty on a body", []string{"--assert-body-empty", url("/ok")}, exitRequestFail},
+		{"--assert-body-empty=false on a body", []string{"--assert-body-empty=false", url("/ok")}, exitOK},
+		{"--assert-body-empty=false on a 204", []string{"--assert-body-empty=false", url("/empty")}, exitRequestFail},
+	} {
+		t.Run(tc.Name, func(t *testing.T) {
+			assertExit(t, run(t, nil, tc.Args...), tc.Want)
+		})
+	}
+
+	// The failure mode that made this a bug rather than an inconsistency: a
+	// user names an assertion and is told there are none.
+	t.Run("a negated flag is never treated as no assertion", func(t *testing.T) {
+		for _, f := range []string{"--assert-ok=false", "--assert-body-empty=false"} {
+			r := run(t, nil, f, url("/empty"))
+			assertNotContains(t, r, "no assertions defined")
+		}
+	})
+
+	// Negation still counts as naming the flag, so repeating it is refused
+	// exactly as repeating the positive form is.
+	t.Run("a repeated negation is still refused", func(t *testing.T) {
+		r := run(t, nil, "--assert-ok", "--assert-ok=false", url("/ok"))
+		assertExit(t, r, exitBadFlagVal)
+		assertContains(t, r, "was given 2 times")
+	})
+}

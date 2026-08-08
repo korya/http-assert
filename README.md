@@ -91,6 +91,16 @@ http-assert [flags] <URL>
 
 The three header flags can be repeated to make several assertions of that kind. Every other assertion flag takes a single value; giving one twice exits `71` rather than silently keeping the last.
 
+`--assert-ok` and `--assert-body-empty` can be negated with `=false`, which asserts the opposite rather than cancelling the flag:
+
+```bash
+# Assert the endpoint IS failing -- useful for testing that a guard rejects
+http-assert --assert-ok=false https://api.example.com/forbidden
+
+# Assert something came back, without saying what
+http-assert --assert-body-empty=false https://api.example.com/report
+```
+
 The three body assertions run against the decoded payload, never the bytes on the wire — see [Compression](#compression).
 
 ### Redirects
