@@ -89,12 +89,59 @@ func TestKnownIssue26MaphostErrorDiscarded(t *testing.T) {
 	assertNotContains(t, r, "has no separator")
 }
 
-// TestKnownIssue28DataDoesNotImplyPost: curl switches to POST for -d; this does not.
-func TestKnownIssue28DataDoesNotImplyPost(t *testing.T) {
-	characterizes(t, 28, "-d keeps the GET method its help text says it changes")
+// TestIssue28DataImpliesPost pins that -d implies POST and curl's default
+// Content-Type, with -X and an explicit Content-Type header overriding.
+//
+// This test previously asserted that the method stayed GET. It flipped when
+// #28 was fixed, which is the record of that change.
+func TestIssue28DataImpliesPost(t *testing.T) {
+	for _, tc := range []struct {
+		Name string
+		Args []string
+		Want []string
+	}{
+		{
+			"bare -d implies POST and form Content-Type",
+			[]string{"-d", "hello=1"},
+			[]string{`\"method\":\"POST\"`, "application/x-www-form-urlencoded"},
+		},
+		{
+			"-X wins over -d",
+			[]string{"-X", "PUT", "-d", "hello=1"},
+			[]string{`\"method\":\"PUT\"`},
+		},
+		{
+			"explicit -X GET wins even against the default",
+			[]string{"-X", "GET", "-d", "hello=1"},
+			[]string{`\"method\":\"GET\"`},
+		},
+		{
+			"an explicit Content-Type is not replaced",
+			[]string{"-d", "{}", "-H", "Content-Type: application/json"},
+			[]string{`\"method\":\"POST\"`, "application/json"},
+		},
+		{
+			"empty -d still posts, with an empty body",
+			[]string{"-d", ""},
+			[]string{`\"method\":\"POST\"`, `\"body\":\"\"`},
+		},
+	} {
+		t.Run(tc.Name, func(t *testing.T) {
+			args := append(tc.Args, "--assert-body-eq", "never-matches", url("/echo"))
+			r := run(t, nil, args...)
+			for _, want := range tc.Want {
+				assertContains(t, r, want)
+			}
+		})
+	}
 
-	r := run(t, nil, "-d", "payload", "--assert-body-eq", "never-matches", url("/echo"))
-	assertContains(t, r, `\"method\":\"GET\"`)
+	// The suppression idiom from the README: an empty Content-Type counts as
+	// given, so the form default must not overwrite it.
+	t.Run("empty Content-Type header suppresses the default", func(t *testing.T) {
+		r := run(t, nil, "-d", "hello=1", "-H", "Content-Type:",
+			"--assert-body-eq", "never-matches", url("/echo"))
+		assertNotContains(t, r, "application/x-www-form-urlencoded")
+	})
 }
 
 // TestKnownIssue31MaxTimeAcceptsNonPositive: values <= 0 reach http.Client.Timeout,

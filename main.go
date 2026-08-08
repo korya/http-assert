@@ -224,9 +224,18 @@ Compression:
 			}
 			c.Init()
 
+			// -d implies POST, as it does in curl; an explicit -X wins even
+			// when it repeats the default, which Changed distinguishes from
+			// "not passed" -- applyEnv cannot fake it because neither flag is
+			// env-applied and Value.Set does not mark Changed.
 			m, _ := cmd.Flags().GetString("request")
+			dataGiven := cmd.Flags().Changed("data")
+			if dataGiven && !cmd.Flags().Changed("request") {
+				m = http.MethodPost
+			}
 			b := io.Reader(http.NoBody)
-			if d, _ := cmd.Flags().GetString("data"); d != "" {
+			if dataGiven {
+				d, _ := cmd.Flags().GetString("data")
 				b = strings.NewReader(d)
 			}
 			req, err := http.NewRequestWithContext(cmd.Context(), m, args[0], b)
@@ -238,6 +247,11 @@ Compression:
 			for _, v := range vs {
 				name, value := mustParseRequestHeader(v)
 				req.Header.Add(name, value)
+			}
+			// curl's default for -d; presence is what suppresses it, so an
+			// explicit empty `-H 'Content-Type:'` is respected, not replaced.
+			if dataGiven && len(req.Header.Values("Content-Type")) == 0 {
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			}
 			if err := c.Do(req, parseAssertionFlags(cmd)...); err != nil {
 				dief(93, "Cannot perform request: %s", err)
@@ -259,7 +273,8 @@ Compression:
 	cmd.PersistentFlags().BoolP("insecure", "k", false, "Disable checking SSL certificates")
 	cmd.PersistentFlags().IntP("max-time", "m", 20,
 		"Maximum time in seconds that you allow each request to take")
-	cmd.Flags().StringP("request", "X", "GET", "Set method for HTTP request")
+	cmd.Flags().StringP("request", "X", "GET",
+		"Set method for HTTP request; overrides the POST that -d implies")
 	cmd.Flags().StringArrayP("header", "H", nil,
 		"Set header for HTTP request, as <name: value>; a name alone is rejected")
 	cmd.Flags().StringP("data", "d", "",

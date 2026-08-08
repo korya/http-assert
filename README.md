@@ -62,8 +62,8 @@ http-assert [flags] <URL>
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--request` | `-X` | HTTP method (default: GET) |
-| `--data` | `-d` | Request body data |
+| `--request` | `-X` | HTTP method (default: GET, or POST when `-d` is given) |
+| `--data` | `-d` | Request body data; implies POST and `Content-Type: application/x-www-form-urlencoded` unless overridden |
 | `--header` | `-H` | Set request headers as `name: value` (can be used multiple times) |
 | `--max-time` | `-m` | Request timeout in seconds (default: 20) |
 | `--insecure` | `-k` | Skip SSL certificate verification |
@@ -75,6 +75,8 @@ http-assert [flags] <URL>
 | `--retry-max-time` | | Stop retrying after this long (default: no limit) |
 
 A `-H` value needs a colon. A bare name exits `71` rather than being sent as a header with an empty value, which is what `curl` reads as "remove this header" — so the two would have meant opposite things. Write `-H 'X-Foo:'` when an empty value is what you want.
+
+`-d` follows `curl`: the method becomes POST unless `-X` says otherwise, and `Content-Type: application/x-www-form-urlencoded` is set unless a `-H` provides one (`-H 'Content-Type:'` counts as providing one). Two deviations remain: `-d @file` sends the literal string `@file` rather than reading the file, and a repeated `-d` is rejected rather than joined with `&`.
 
 ### Assertion Options
 
