@@ -1,9 +1,7 @@
 # http-assert ![Github Actions](https://github.com/korya/http-assert/actions/workflows/build.yml/badge.svg) [![Go Reference](https://pkg.go.dev/badge/github.com/korya/http-assert.svg)](https://pkg.go.dev/github.com/korya/http-assert)
 
-`http-assert` makes an HTTP request with the flags you know from `curl` and
-checks the response against assertions declared as flags: the status code,
-headers, the body, or a `jq` expression over it. When a check fails, it exits
-non-zero and reports every failing assertion, not just the first.
+`http-assert` is `curl` with assertions: the simplest way to test a server end
+to end, or to wait for a service to come up ready.
 
 ```console
 $ http-assert --retry 30 --retry-delay 1s \
