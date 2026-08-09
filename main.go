@@ -295,9 +295,9 @@ Compression:
 		"Provide a custom address for a specific host and port pair; "+
 			"e.g. <srchostname:srcport=dsthostname[:dstport]>")
 	cmd.PersistentFlags().BoolP("verbose", "v", false,
-		"Be verbose; log debug messages (same as --log-level debug)")
+		"Be verbose; log debug messages (same as --log-level debug; overrides --log-level)")
 	cmd.PersistentFlags().BoolP("silent", "s", false,
-		"Be silent; log error messages only (same as --log-level error)")
+		"Be silent; log error messages only (same as --log-level error; overrides -v)")
 	cmd.PersistentFlags().String("log-level", "",
 		"Set log level; possible values: debug, info (default), warn, error")
 	cmd.PersistentFlags().BoolP("insecure", "k", false, "Disable checking SSL certificates")

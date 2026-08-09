@@ -392,17 +392,9 @@ way. Reading those bytes as plain text would be its own silent corruption.
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--verbose` | `-v` | Enable verbose logging |
-| `--silent` | `-s` | Only log errors |
+| `--verbose` | `-v` | Enable verbose logging (overrides `--log-level`) |
+| `--silent` | `-s` | Only log errors (overrides `-v`) |
 | `--log-level` | | Set log level (debug, info, warn, error) |
-
-The three options set one level. When more than one asks, the command line
-beats the environment as a whole — so `-v` on a CI step overrides an
-`HTTP_ASSERT_SILENT` from the job template — and within one channel `-s`
-beats `-v` beats `--log-level`. A conflict never fails the run; each option
-that lost to a different level is announced with a one-line
-`Warning: -s overrides -v` on stderr, printed even when the winner is the
-silencing flag.
 
 **Everything the tool prints goes to stderr; stdout is always empty.** Use
 `2>&1` when capturing output in a file or a pipe.
