@@ -491,26 +491,78 @@ const (
 	LDebug
 )
 
+// levelRequest is one verbosity option asking for a level, named the way the
+// caller spelled it so a conflict warning can point at the right surface.
+type levelRequest struct {
+	name  string
+	level LogLevel
+}
+
+// levelRequests returns the options that ask for a log level on one channel:
+// the command line when fromCLI, the environment otherwise. Changed tells the
+// channels apart -- parsing sets it, applyEnv's Value.Set does not. The slice
+// is in priority order, -s before -v before --log-level, so the first entry
+// is the channel's winner. A false boolean or an empty --log-level declines
+// to ask rather than asking for the default, which lets -v=false cancel an
+// environment-supplied verbose without starting a conflict.
+func levelRequests(fs *pflag.FlagSet, fromCLI bool) []levelRequest {
+	name := func(flag, env string) string {
+		if fromCLI {
+			return flag
+		}
+		return env
+	}
+
+	var res []levelRequest
+	if fs.Changed("silent") == fromCLI {
+		if v, _ := fs.GetBool("silent"); v {
+			res = append(res, levelRequest{name("-s", "HTTP_ASSERT_SILENT"), LError})
+		}
+	}
+	if fs.Changed("verbose") == fromCLI {
+		if v, _ := fs.GetBool("verbose"); v {
+			res = append(res, levelRequest{name("-v", "HTTP_ASSERT_VERBOSE"), LDebug})
+		}
+	}
+	if fs.Changed("log-level") == fromCLI {
+		if s, _ := fs.GetString("log-level"); s != "" {
+			lv, ok := parseLogLevel(s)
+			if !ok {
+				dief(exitBadInvocation, "Invalid value for --log-level flag: %q", s)
+			}
+			res = append(res, levelRequest{name("--log-level "+s, "HTTP_ASSERT_LOG_LEVEL"), lv})
+		}
+	}
+	return res
+}
+
+// mustParseLogLevel resolves the three verbosity options into one level: the
+// command line beats the environment as a whole, and within one channel -s
+// beats -v beats --log-level. A conflict never fails the run -- verbosity is
+// not worth aborting over -- but every overridden request that asked for a
+// different level is announced (#29).
+//
+// The announcement goes straight to stderr rather than through the logger:
+// a warn-severity log line would be suppressed by the very level it reports,
+// so `-v -s` would resolve to silent and swallow its own explanation.
 func mustParseLogLevel(cmd *cobra.Command) LogLevel {
-	levelStr, _ := cmd.Flags().GetString("log-level")
-	if levelStr == "" {
-		if v, _ := cmd.Flags().GetBool("verbose"); v {
-			return LDebug
-		}
-
-		if v, _ := cmd.Flags().GetBool("silent"); v {
-			return LError
-		}
-
+	fs := cmd.Flags()
+	// The command-line requests come first, so the head of the combined list
+	// is the overall winner and the environment's requests can only lead when
+	// no command-line option asked at all. Keeping the losing channel in the
+	// list is what makes a cross-channel override visible in the warning.
+	reqs := append(levelRequests(fs, true), levelRequests(fs, false)...)
+	if len(reqs) == 0 {
 		return LInfo
 	}
 
-	res, ok := parseLogLevel(levelStr)
-	if !ok {
-		dief(exitBadInvocation, "Invalid value for --log-level flag: %q", levelStr)
+	winner := reqs[0]
+	for _, loser := range reqs[1:] {
+		if loser.level != winner.level {
+			fmt.Fprintf(os.Stderr, "Warning: %s overrides %s\n", winner.name, loser.name)
+		}
 	}
-
-	return res
+	return winner.level
 }
 
 func parseLogLevel(s string) (LogLevel, bool) {

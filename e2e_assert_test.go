@@ -289,6 +289,89 @@ func TestE2ELogLevels(t *testing.T) {
 	})
 }
 
+// TestE2EVerbosityPriority pins how the three verbosity options resolve when
+// more than one asks for a level: the command line beats the environment as a
+// whole, within one channel -s beats -v beats --log-level, and every request
+// overridden to a different level is announced rather than silently dropped.
+//
+// Previously the ties resolved by an undocumented ladder with no announcement,
+// so -v -s ran verbose with no sign that -s lost (#29). A conflict is never an
+// error: the run proceeds at the winning level.
+func TestE2EVerbosityPriority(t *testing.T) {
+	okURL := url("/ok")
+
+	t.Run("-s beats -v, and says so despite winning silence", func(t *testing.T) {
+		r := run(t, nil, "-v", "-s", "--assert-ok", okURL)
+		assertExit(t, r, exitOK)
+		assertNotContains(t, r, "PASSED")
+		assertContains(t, r, "Warning: -s overrides -v")
+	})
+
+	t.Run("-s beats --log-level", func(t *testing.T) {
+		r := run(t, nil, "-s", "--log-level", "debug", "--assert-ok", okURL)
+		assertExit(t, r, exitOK)
+		assertNotContains(t, r, "PASSED")
+		assertContains(t, r, "Warning: -s overrides --log-level debug")
+	})
+
+	t.Run("-v beats --log-level", func(t *testing.T) {
+		r := run(t, nil, "-v", "--log-level", "error", "--assert-ok", okURL)
+		assertExit(t, r, exitOK)
+		assertContains(t, r, "PASSED")
+		assertContains(t, r, "Warning: -v overrides --log-level error")
+	})
+
+	t.Run("the command line beats the environment's silent", func(t *testing.T) {
+		r := run(t, map[string]string{"HTTP_ASSERT_SILENT": "true"}, "-v", "--assert-ok", okURL)
+		assertExit(t, r, exitOK)
+		assertContains(t, r, "PASSED")
+		assertContains(t, r, "Warning: -v overrides HTTP_ASSERT_SILENT")
+	})
+
+	// The case that used to invert the documented precedence: the
+	// environment's log level ate an explicit -v.
+	t.Run("the command line beats the environment's log level", func(t *testing.T) {
+		r := run(t, map[string]string{"HTTP_ASSERT_LOG_LEVEL": "error"}, "-v", "--assert-ok", okURL)
+		assertExit(t, r, exitOK)
+		assertContains(t, r, "PASSED")
+		assertContains(t, r, "Warning: -v overrides HTTP_ASSERT_LOG_LEVEL")
+	})
+
+	t.Run("within the environment, silent still beats verbose", func(t *testing.T) {
+		r := run(t, map[string]string{
+			"HTTP_ASSERT_VERBOSE": "true",
+			"HTTP_ASSERT_SILENT":  "true",
+		}, "--assert-ok", okURL)
+		assertExit(t, r, exitOK)
+		assertNotContains(t, r, "PASSED")
+		assertContains(t, r, "Warning: HTTP_ASSERT_SILENT overrides HTTP_ASSERT_VERBOSE")
+	})
+
+	// Nothing was overridden to a different level, so there is nothing to
+	// announce.
+	t.Run("an agreeing pair warns about nothing", func(t *testing.T) {
+		r := run(t, nil, "-v", "--log-level", "debug", "--assert-ok", okURL)
+		assertExit(t, r, exitOK)
+		assertContains(t, r, "PASSED")
+		assertNotContains(t, r, "Warning:")
+	})
+
+	// A false boolean declines to ask for a level rather than asking for the
+	// default: no conflict with -s, and it cancels the environment's verbose
+	// instead of losing to it.
+	t.Run("-v=false neither conflicts nor resurrects", func(t *testing.T) {
+		r := run(t, nil, "-v=false", "-s", "--assert-ok", okURL)
+		assertExit(t, r, exitOK)
+		assertNotContains(t, r, "PASSED")
+		assertNotContains(t, r, "Warning:")
+
+		r = run(t, map[string]string{"HTTP_ASSERT_VERBOSE": "true"}, "-v=false", "--assert-ok", okURL)
+		assertExit(t, r, exitOK)
+		assertContains(t, r, "PASSED") // info, not debug: the env verbose is gone
+		assertNotContains(t, r, "Warning:")
+	})
+}
+
 // TestE2EHeaderPresenceAssertions covers the bare-name form of both header
 // assertion flags, where the absence of a value means "assert present" rather
 // than "assert equal to the empty string".
