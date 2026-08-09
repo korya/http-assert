@@ -39,7 +39,7 @@ The stock answers each see half the picture:
   a bare exit code, nothing retries while the service comes up, and the
   healthcheck image now needs `curl` *and* `jq` in it.
 
-`http-assert` is the missing middle: one static binary. It makes the request,
+`http-assert` closes that gap with one static binary. It makes the request,
 checks status, headers and body in one pass, and retries until the service is
 ready. When a check fails, it reports every failing assertion with what it
 actually saw:
@@ -56,6 +56,8 @@ Built for the places where the exit code is the whole point:
 
 - **Deploy gates**: replace `sleep 10; curl -f` with a poll that passes the
   moment the service is ready and fails with evidence when it never is
+- **End-to-end tests**: send the real request with `-X`, `-H` and `-d`, and
+  assert on everything that comes back
 - **Container healthchecks**: statically linked, drops into a `scratch` or
   `distroless` image with `COPY --from`
 - **Monitoring probes**: reports that name every failed check and stay
