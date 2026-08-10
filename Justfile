@@ -46,6 +46,42 @@ lint-config-check:
       fi
     done
 
+[doc("Warn if the pinned toolchain has fallen behind its patch line")]
+toolchain-check:
+    #!/usr/bin/env bash
+    # `toolchain` in go.mod buys reproducible builds -- the Go version is
+    # stamped into the binary, so a floating compiler changes the checksum that
+    # -trimpath and mod_timestamp exist to keep stable. What it costs is the
+    # automatic patch upgrade GOTOOLCHAIN=auto used to perform, and every Go
+    # patch release carries security fixes. Nothing else bumps the pin, so this
+    # says when it has fallen behind.
+    #
+    # It warns rather than fails. A new Go patch is not a defect in this
+    # repository, and a red build every six weeks teaches everyone to ignore it.
+    set -uo pipefail
+    pinned=$(sed -n 's/^toolchain go//p' go.mod)
+    if [ -z "$pinned" ]; then
+      echo "go.mod has no toolchain directive; nothing to check"
+      exit 0
+    fi
+    minor=${pinned%.*}
+    latest=$(curl -fsS --max-time 10 "https://go.dev/dl/?mode=json&include=all" \
+      | grep -oE "\"go${minor//./\\.}(\.[0-9]+)?\"" | tr -d '"' | sed 's/^go//' \
+      | sort -uV | tail -1)
+    # An unreachable go.dev is not a reason to fail a build that is otherwise
+    # fine, and not a reason to claim the pin is current either.
+    if [ -z "$latest" ]; then
+      echo "could not read the Go release list; skipped the freshness check" >&2
+      exit 0
+    fi
+    if [ "$pinned" = "$latest" ]; then
+      echo "toolchain go${pinned} is the current ${minor} patch"
+      exit 0
+    fi
+    msg="toolchain go${pinned} trails go${latest}; Go patch releases carry security fixes"
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning file=go.mod::${msg}"
+    echo "$msg" >&2
+
 [doc("Run go vet")]
 vet:
     go vet ./...
