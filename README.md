@@ -116,6 +116,8 @@ http-assert completion zsh --help   # per-shell install instructions
 
 ### From Source
 
+Requires Go 1.26 or newer. A release binary needs no Go toolchain at all.
+
 ```bash
 go install github.com/korya/http-assert@latest
 ```
@@ -411,7 +413,7 @@ tool logs at the warn level.
 
 ```console
 $ http-assert --version
-http-assert version v0.1.0 (commit 4ffe282, built 2026-08-07T22:24:59Z, go1.25.5, linux/amd64)
+http-assert version v0.1.0 (commit 4ffe282, built 2026-08-07T22:24:59Z, go1.26.5, linux/amd64)
 ```
 
 A binary built from a checkout rather than a release reports the commit it was
