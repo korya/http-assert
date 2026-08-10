@@ -27,6 +27,12 @@ jobs:
     - name: Install just
       uses: extractions/setup-just@v4
 
+    # The pin in go.mod cannot upgrade itself, and every Go patch release
+    # carries security fixes. This reports drift; it does not fail the build,
+    # because a new Go patch is not a defect in this repository.
+    - name: Check the pinned Go toolchain is current
+      run: just toolchain-check
+
     - name: Install golangci-lint
       uses: golangci/golangci-lint-action@v9
       with:
