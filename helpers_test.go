@@ -48,3 +48,21 @@ func checkErrMatch(t *testing.T, label string, err error, pattern string) {
 		t.Errorf("%s: error = %q, want match %q", label, err.Error(), pattern)
 	}
 }
+
+// check runs an assertion the way doOnce does, flattening Check's two returns
+// into the single error these tables compare against.
+//
+// The nil guard is load-bearing: returning a nil *Failure through an error
+// interface yields a non-nil error holding a nil pointer, which would fail
+// every "expected no error" case with an unreadable message.
+func check(a Assertion, res *httpResponse) error {
+	f, err := a.Check(res)
+	if err != nil {
+		return err
+	}
+	if f != nil {
+		return f
+	}
+
+	return nil
+}

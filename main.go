@@ -932,8 +932,17 @@ func (c Client) doOnce(client *http.Client, req *http.Request, assertions []Asse
 
 	var assertErrors []error
 	for i := range assertions {
-		if err := assertions[i](httpRes); err != nil {
+		// A failed assertion and one that could not be evaluated are both
+		// failures of the run and both print the same way, so they share a
+		// list -- which is also what keeps the dump in the order the
+		// assertions were given. Only a machine-readable consumer needs to
+		// tell them apart, and that is what Check separates them for (#45).
+		f, err := assertions[i].Check(httpRes)
+		switch {
+		case err != nil:
 			assertErrors = append(assertErrors, err)
+		case f != nil:
+			assertErrors = append(assertErrors, f)
 		}
 	}
 	if len(assertErrors) > 0 {

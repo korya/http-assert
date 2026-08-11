@@ -50,8 +50,8 @@ func Test_AssertStatusOK(t *testing.T) {
 				wantOK, wantNOK = fmt.Sprintf("ok: expected OK, got %d (%q)", tc.StatusCode, tc.Status), ""
 			}
 
-			checkErr(t, "ok", ok(res), wantOK)
-			checkErr(t, "nok", nok(res), wantNOK)
+			checkErr(t, "ok", check(ok, res), wantOK)
+			checkErr(t, "nok", check(nok, res), wantNOK)
 		})
 	}
 }
@@ -96,7 +96,7 @@ func Test_AssertStatusEqual(t *testing.T) {
 				if tc.StatusCode != expected {
 					want = fmt.Sprintf("status: expected %d, got %d (%q)", expected, tc.StatusCode, tc.Status)
 				}
-				checkErr(t, fmt.Sprintf("expected %d", expected), assertions[expected](res), want)
+				checkErr(t, fmt.Sprintf("expected %d", expected), check(assertions[expected], res), want)
 			}
 		})
 	}
@@ -211,17 +211,17 @@ func Test_AssertHeader(t *testing.T) {
 			}
 
 			if tc.ExpMissing {
-				checkErr(t, "present", present(res), `header[taRgEt]: expected to be present, missing`)
-				checkErr(t, "missing", missing(res), "")
+				checkErr(t, "present", check(present, res), `header[taRgEt]: expected to be present, missing`)
+				checkErr(t, "missing", check(missing, res), "")
 			} else {
-				checkErr(t, "present", present(res), "")
+				checkErr(t, "present", check(present, res), "")
 				// The values are echoed back, so match rather than pin them.
-				checkErrMatch(t, "missing", missing(res),
+				checkErrMatch(t, "missing", check(missing, res),
 					`header\[taRgEt\]: expected to be missing, got \[.*\]$`)
 			}
 
-			checkErr(t, "equal", equal(res), tc.ExpEqualError)
-			checkErr(t, "match", match(res), tc.ExpMatchError)
+			checkErr(t, "equal", check(equal, res), tc.ExpEqualError)
+			checkErr(t, "match", check(match, res), tc.ExpMatchError)
 		})
 	}
 }
@@ -277,9 +277,9 @@ func Test_AssertBody(t *testing.T) {
 		t.Run(tc.CaseName, func(t *testing.T) {
 			res := &httpResponse{BodyBytes: tc.Body}
 
-			checkErr(t, "empty", empty(res), tc.ExpEmptyError)
-			checkErr(t, "equal", equal(res), tc.ExpEqualError)
-			checkErr(t, "match", match(res), tc.ExpMatchError)
+			checkErr(t, "empty", check(empty, res), tc.ExpEmptyError)
+			checkErr(t, "equal", check(equal, res), tc.ExpEqualError)
+			checkErr(t, "match", check(match, res), tc.ExpMatchError)
 		})
 	}
 }
@@ -297,10 +297,10 @@ func Test_AssertBody_emptyIsAssertable(t *testing.T) {
 
 	t.Run("equal to the empty string", func(t *testing.T) {
 		res := &httpResponse{BodyBytes: []byte{}}
-		checkErr(t, "equal", AssertBodyEqual("")(res), "")
+		checkErr(t, "equal", check(AssertBodyEqual(""), res), "")
 
 		// And a nil body, which is what a 204 produces.
-		checkErr(t, "equal, nil body", AssertBodyEqual("")(&httpResponse{}), "")
+		checkErr(t, "equal, nil body", check(AssertBodyEqual(""), &httpResponse{}), "")
 	})
 
 	for _, p := range patterns {
@@ -310,8 +310,8 @@ func Test_AssertBody_emptyIsAssertable(t *testing.T) {
 				t.Fatalf("cannot build the assertion: %s", err)
 			}
 
-			checkErr(t, "match", a(&httpResponse{BodyBytes: []byte{}}), "")
-			checkErr(t, "match, nil body", a(&httpResponse{}), "")
+			checkErr(t, "match", check(a, &httpResponse{BodyBytes: []byte{}}), "")
+			checkErr(t, "match, nil body", check(a, &httpResponse{}), "")
 		})
 	}
 
@@ -319,19 +319,19 @@ func Test_AssertBody_emptyIsAssertable(t *testing.T) {
 	// something was expected still reads as "missing" rather than `got ""`.
 	t.Run("an empty body still reports as missing", func(t *testing.T) {
 		res := &httpResponse{BodyBytes: []byte{}}
-		checkErr(t, "equal", AssertBodyEqual("value")(res), `body: expected "value", missing`)
+		checkErr(t, "equal", check(AssertBodyEqual("value"), res), `body: expected "value", missing`)
 
 		a, err := AssertBodyMatch("^value$")
 		if err != nil {
 			t.Fatalf("cannot build the assertion: %s", err)
 		}
-		checkErr(t, "match", a(res), `body: expected to match "^value$", missing`)
+		checkErr(t, "match", check(a, res), `body: expected to match "^value$", missing`)
 	})
 
 	// The inverse must keep failing: a non-empty body is not the empty string.
 	t.Run("a non-empty body does not equal the empty string", func(t *testing.T) {
 		res := &httpResponse{BodyBytes: []byte("x")}
-		checkErr(t, "equal", AssertBodyEqual("")(res), `body: expected "", got "x"`)
+		checkErr(t, "equal", check(AssertBodyEqual(""), res), `body: expected "", got "x"`)
 	})
 }
 
@@ -501,8 +501,8 @@ func Test_AssertRedirect(t *testing.T) {
 				},
 			}
 
-			checkErr(t, "equal", equal(res), tc.ExpEqualError)
-			checkErr(t, "match", match(res), tc.ExpMatchError)
+			checkErr(t, "equal", check(equal, res), tc.ExpEqualError)
+			checkErr(t, "match", check(match, res), tc.ExpMatchError)
 		})
 	}
 }
@@ -540,7 +540,7 @@ func Test_AssertBodyNotEmpty(t *testing.T) {
 	a := AssertBodyNotEmpty()
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			checkErr(t, "not-empty", a(&httpResponse{BodyBytes: tc.Body}), tc.Want)
+			checkErr(t, "not-empty", check(a, &httpResponse{BodyBytes: tc.Body}), tc.Want)
 		})
 	}
 
@@ -550,7 +550,7 @@ func Test_AssertBodyNotEmpty(t *testing.T) {
 		empty := AssertBodyEmpty()
 		for _, body := range [][]byte{nil, {}, []byte(" "), []byte("x"), []byte("longer body")} {
 			res := &httpResponse{BodyBytes: body}
-			if (empty(res) == nil) == (a(res) == nil) {
+			if (check(empty, res) == nil) == (check(a, res) == nil) {
 				t.Errorf("both agree on %q; they must disagree", string(body))
 			}
 		}

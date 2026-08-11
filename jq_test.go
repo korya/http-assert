@@ -129,7 +129,7 @@ func Test_AssertJQ(t *testing.T) {
 				t.Fatalf("cannot build the assertion: %s", err)
 			}
 
-			checkErr(t, "jq", a(jqResponse(tc.Body)), tc.Want)
+			checkErr(t, "jq", check(a, jqResponse(tc.Body)), tc.Want)
 		})
 	}
 }
@@ -206,7 +206,15 @@ func Test_AssertJQ_boundsARunawayQuery(t *testing.T) {
 
 			done := make(chan error, 1)
 			start := time.Now()
-			go func() { done <- runJQ(code, query, jqResponse(jqDoc), short) }()
+			go func() {
+				// Either return means the query did not succeed; the test
+				// only cares that it stopped, and why is asserted below.
+				f, err := runJQ(code, query, jqResponse(jqDoc), short)
+				if err == nil && f != nil {
+					err = f
+				}
+				done <- err
+			}()
 
 			select {
 			case err := <-done:
