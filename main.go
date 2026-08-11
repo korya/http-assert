@@ -135,6 +135,13 @@ Repeat --assert-header, --assert-header-eq, --assert-header-missing or
 takes a single value and is rejected if given twice, rather than quietly
 keeping the last.
 
+A response header can also carry several values -- Set-Cookie routinely does --
+and that is a different thing from repeating the flag. --assert-header and
+--assert-header-eq hold when ANY value matches, so --assert-header-eq
+'Set-Cookie: session=abc' passes on a response that also sets two other
+cookies. --assert-header-missing is the strict one: it fails if the header
+carries any value at all.
+
 The two boolean assertions can be negated with =false, which selects the
 opposite assertion rather than cancelling the flag: --assert-ok=false asserts
 the status IS an error, and --assert-body-empty=false asserts the body is not
@@ -649,9 +656,9 @@ func parseHostMappings(vals []string) ([]hostMapping, error) {
 func registerAssertionFlags(cmd *cobra.Command) {
 	cmd.Flags().Int("assert-status", 0, "Assert response status equals the provided value")
 	cmd.Flags().StringArray("assert-header", nil,
-		"Assert header matches the provided regexp; NAME alone asserts it is present")
+		"Assert any value of the header matches the provided regexp; NAME alone asserts it is present")
 	cmd.Flags().StringArray("assert-header-eq", nil,
-		"Assert header equals the provided value; NAME alone asserts it is present")
+		"Assert any value of the header equals the provided value; NAME alone asserts it is present")
 	cmd.Flags().StringArray("assert-header-missing", nil, "Assert header is missing")
 	cmd.Flags().String("assert-body", "", "Assert body matches the provided regexp")
 	cmd.Flags().String("assert-body-eq", "", "Assert body equals the provided value")

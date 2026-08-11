@@ -588,3 +588,64 @@ func TestE2EBadPatternIsRejected(t *testing.T) {
 		assertExit(t, run(t, nil, "--assert-body", `"status":\s*"success"`, url("/ok")), exitOK)
 	})
 }
+
+// TestE2EHeaderMultiValue pins the semantics of a repeated response header and
+// the way its values are rendered when an assertion fails (#97).
+//
+// A header can carry several values, which is a different thing from repeating
+// the flag. The matching rule was already the behaviour; it was never written
+// down anywhere a user would look, and the failure was the only hint -- in Go's
+// own slice syntax.
+func TestE2EHeaderMultiValue(t *testing.T) {
+	t.Run("any value satisfies --assert-header-eq", func(t *testing.T) {
+		for _, v := range []string{"a=1", "b=2"} {
+			assertExit(t, run(t, nil, "--assert-header-eq", "Set-Cookie: "+v, url("/multi")), exitOK)
+		}
+	})
+
+	t.Run("any value satisfies --assert-header", func(t *testing.T) {
+		for _, p := range []string{`^a=\d$`, `^b=\d$`} {
+			assertExit(t, run(t, nil, "--assert-header", "Set-Cookie: "+p, url("/multi")), exitOK)
+		}
+	})
+
+	// The strict one: a header carrying any value at all is not missing.
+	t.Run("--assert-header-missing fails on a multi-valued header", func(t *testing.T) {
+		r := run(t, nil, "--assert-header-missing", "Set-Cookie", url("/multi"))
+		assertExit(t, r, exitAssertFail)
+		assertContains(t, r, `header[Set-Cookie]: expected to be missing, got "a=1", "b=2"`)
+	})
+
+	t.Run("a failure lists the values a person would write", func(t *testing.T) {
+		r := run(t, nil, "--assert-header-eq", "Set-Cookie: nope", url("/multi"))
+		assertExit(t, r, exitAssertFail)
+		assertContains(t, r, `header[Set-Cookie]: expected "nope", got "a=1", "b=2"`)
+	})
+
+	// One value reads as one value. `got ["v1"]` said something bracketed had
+	// happened to a header that only ever had one value.
+	t.Run("a single-valued header is not rendered as a list", func(t *testing.T) {
+		r := run(t, nil, "--assert-header-eq", "X-Api-Version: nope", url("/ok"))
+		assertExit(t, r, exitAssertFail)
+		assertContains(t, r, `header[X-Api-Version]: expected "nope", got "v1"`)
+	})
+
+	t.Run("--assert-header renders the same way", func(t *testing.T) {
+		r := run(t, nil, "--assert-header", `X-Api-Version: ^v9$`, url("/ok"))
+		assertExit(t, r, exitAssertFail)
+		assertContains(t, r, `header[X-Api-Version]: expected to match "^v9$", got "v1"`)
+	})
+
+	// The regression guard: no assertion may leak Go's slice syntax again.
+	t.Run("no failure leaks Go slice syntax", func(t *testing.T) {
+		for _, args := range [][]string{
+			{"--assert-header-eq", "Set-Cookie: nope", url("/multi")},
+			{"--assert-header", "Set-Cookie: ^nope$", url("/multi")},
+			{"--assert-header-missing", "Set-Cookie", url("/multi")},
+			{"--assert-header-eq", "X-Api-Version: nope", url("/ok")},
+		} {
+			r := run(t, nil, args...)
+			assertNotContains(t, r, `got [`)
+		}
+	})
+}
