@@ -58,7 +58,20 @@ func Test_AssertStatusOK(t *testing.T) {
 	}
 }
 
-func Test_AssertStatusEqual(t *testing.T) {
+// mustSpec parses a spec that the test author asserts is valid. Parsing rather
+// than constructing keeps the tests honest about the only path a caller has.
+func mustSpec(t *testing.T, text string) statusSpec {
+	t.Helper()
+
+	spec, err := parseStatusSpec(text)
+	if err != nil {
+		t.Fatalf("parseStatusSpec(%q): unexpected error: %s", text, err)
+	}
+
+	return spec
+}
+
+func Test_AssertStatus(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
@@ -81,9 +94,15 @@ func Test_AssertStatusEqual(t *testing.T) {
 		{914, "Custom Response", false},
 	}
 
-	// 1 is never a real status, so that assertion must always fail; 200 and 429
-	// appear in the table and must pass for their own case only.
-	assertions := map[int]Assertion{1: AssertStatusEqual(1), 200: AssertStatusEqual(200), 429: AssertStatusEqual(429)}
+	// 599 appears in no case above, so that assertion must always fail; 200 and
+	// 429 appear in the table and must pass for their own case only. It used to
+	// be 1, which is no longer expressible: a spec naming a code no response
+	// can carry is now rejected at the flag rather than failing at runtime.
+	assertions := map[int]Assertion{
+		599: AssertStatus(mustSpec(t, "599")),
+		200: AssertStatus(mustSpec(t, "200")),
+		429: AssertStatus(mustSpec(t, "429")),
+	}
 	for _, tc := range testCases {
 		t.Run(strconv.Itoa(tc.StatusCode), func(t *testing.T) {
 			res := &httpResponse{
@@ -93,7 +112,7 @@ func Test_AssertStatusEqual(t *testing.T) {
 				},
 			}
 
-			for _, expected := range []int{1, 200, 429} {
+			for _, expected := range []int{599, 200, 429} {
 				want := ""
 				if tc.StatusCode != expected {
 					want = fmt.Sprintf("status: expected %d, got %d (%q)", expected, tc.StatusCode, tc.Status)
@@ -645,9 +664,9 @@ func Test_AssertionIdentity(t *testing.T) {
 			Kind: "nok", Expected: "not 2xx-3xx", Actual: 200,
 		},
 		{
-			Name: "status", Assertion: AssertStatusEqual(200),
+			Name: "status", Assertion: AssertStatus(mustSpec(t, "200")),
 			Res:  statusRes(500, "500 Internal Server Error"),
-			Kind: "status", Expected: 200, Actual: 500,
+			Kind: "status", Expected: "200", Actual: 500,
 		},
 		{
 			Name: "header present", Assertion: AssertHeaderPresent("X-Absent"),

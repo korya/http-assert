@@ -142,6 +142,18 @@ and that is a different thing from repeating the flag. --assert-header and
 cookies. --assert-header-missing is the strict one: it fails if the header
 carries any value at all.
 
+--assert-status takes more than one code. A class matches its hundred, a range
+matches its span inclusively, and a comma-separated list matches any entry;
+they mix freely:
+
+  --assert-status 2xx          any 200-299
+  --assert-status 200,204      either of those two
+  --assert-status 401-403      any of 401, 402, 403
+  --assert-status 301,2xx      a class and a code together
+
+A code no response can carry is rejected before the request is made, so a typo
+exits 71 rather than reporting a service that answered perfectly well as wrong.
+
 The two boolean assertions can be negated with =false, which selects the
 opposite assertion rather than cancelling the flag: --assert-ok=false asserts
 the status IS an error, and --assert-body-empty=false asserts the body is not
@@ -789,7 +801,8 @@ func parseHostMappings(vals []string) ([]hostMapping, error) {
 }
 
 func registerAssertionFlags(cmd *cobra.Command) {
-	cmd.Flags().Int("assert-status", 0, "Assert response status equals the provided value")
+	cmd.Flags().String("assert-status", "",
+		"Assert response status; a code, a class like 2xx, a range like 401-403, or a list of those")
 	cmd.Flags().StringArray("assert-header", nil,
 		"Assert any value of the header matches the provided regexp; NAME alone asserts it is present")
 	cmd.Flags().StringArray("assert-header-eq", nil,
@@ -916,8 +929,12 @@ func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 	}
 
 	if cmd.Flags().Changed("assert-status") {
-		s, _ := cmd.Flags().GetInt("assert-status")
-		res = append(res, AssertStatusEqual(s))
+		v, _ := cmd.Flags().GetString("assert-status")
+		spec, err := parseStatusSpec(v)
+		if err != nil {
+			dief(exitBadInvocation, "Invalid value for --assert-status flag: %s", err)
+		}
+		res = append(res, AssertStatus(spec))
 	}
 
 	if cmd.Flags().Changed("assert-header") {
