@@ -214,8 +214,9 @@ Colour:
   still wins over it, on the grounds that a variable says what to do in the
   absence of an instruction and the flag is one.
 
-  The verdict is green or red; the [.] [:] [>] [~] lines leading up to it are
-  dimmed. Nothing else is coloured -- the failure list stays plain so it can be
+  The verdict is green or red and the [.] [:] [>] trace lines are dimmed. [~] is
+  yellow: a retry is the one line that reports trouble without being the
+  verdict. Nothing else is coloured -- the failure list stays plain so it can be
   copied out of a terminal unchanged.`,
 		Example: `  # A health check: any non-error status passes
   http-assert --assert-ok https://example.com/health
@@ -509,10 +510,11 @@ func (e *exitError) Error() string { return e.msg }
 // on everything that renders escapes at all, so there is no capability to
 // probe beyond "is anyone watching".
 const (
-	ansiReset = "\033[0m"
-	ansiRed   = "\033[31m"
-	ansiGreen = "\033[32m"
-	ansiDim   = "\033[2m"
+	ansiReset  = "\033[0m"
+	ansiRed    = "\033[31m"
+	ansiGreen  = "\033[32m"
+	ansiYellow = "\033[33m"
+	ansiDim    = "\033[2m"
 )
 
 // palette decides whether a line is written with colour. The zero value writes
@@ -537,9 +539,13 @@ func (p palette) wrap(code, s string) string {
 //
 // The sigil vocabulary already says what each line is; colour only makes the
 // distinction survive a scroll through a CI log, which is the whole complaint
-// (#98). The verdict is green or red, and the four lines that lead up to it are
-// dimmed so the verdict is what the eye lands on. Dimming [.] and [:] but not
-// [>] and [~] would leave the rarer trace lines louder than the common ones.
+// (#98). The verdict is green or red and the trace lines are dimmed, so the
+// verdict is what the eye lands on.
+//
+// [~] is the exception: a retry is the one trace line that reports something
+// went wrong without being the verdict, and a run that passed on the fourth
+// attempt is not the same news as one that passed on the first. Yellow says
+// that without claiming the run failed.
 func (p palette) line(s string) string {
 	if !p.on {
 		return s
@@ -555,8 +561,10 @@ func (p palette) line(s string) string {
 		body = p.wrap(ansiGreen, body)
 	case strings.HasPrefix(body, "[-]"):
 		body = p.wrap(ansiRed, body)
+	case strings.HasPrefix(body, "[~]"):
+		body = p.wrap(ansiYellow, body)
 	case strings.HasPrefix(body, "[.]"), strings.HasPrefix(body, "[:]"),
-		strings.HasPrefix(body, "[>]"), strings.HasPrefix(body, "[~]"):
+		strings.HasPrefix(body, "[>]"):
 		body = p.wrap(ansiDim, body)
 	}
 

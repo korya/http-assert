@@ -78,7 +78,7 @@ func Test_paletteLine(t *testing.T) {
 		{"the request line is dimmed", "[.] GET /\n", ansiDim + "[.] GET /" + ansiReset + "\n"},
 		{"the response line is dimmed", "[:] 200 OK\n", ansiDim + "[:] 200 OK" + ansiReset + "\n"},
 		{"the redirect line is dimmed", "[>] /next\n", ansiDim + "[>] /next" + ansiReset + "\n"},
-		{"the wait line is dimmed", "[~] waiting 1s\n", ansiDim + "[~] waiting 1s" + ansiReset + "\n"},
+		{"the retry line is yellow", "[~] retry 1/3 in 1s\n", ansiYellow + "[~] retry 1/3 in 1s" + ansiReset + "\n"},
 		{"an unsigilled line is left alone", "plain text\n", "plain text\n"},
 		// The reset belongs before the blank line, or a terminal paints it.
 		{"trailing newlines stay outside the sequence", "[+] PASSED\n\n", ansiGreen + "[+] PASSED" + ansiReset + "\n\n"},
