@@ -278,7 +278,7 @@ func Test_bodyAssertionsRefuseAnEncodedBody(t *testing.T) {
 			res := encoded("br", []byte{0x1b, 0x13, 0x00})
 			res.decodeBody()
 
-			checkErrMatch(t, name, a(res), `^body: response is br-encoded and was not decoded: `)
+			checkErrMatch(t, name, check(a, res), `^body: response is br-encoded and was not decoded: `)
 		})
 	}
 }
