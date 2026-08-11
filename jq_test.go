@@ -286,10 +286,10 @@ func Test_decodeJSON_parsesOnce(t *testing.T) {
 	// the reader would otherwise go looking for a malformed payload (#27).
 	t.Run("an undecoded body reports the encoding", func(t *testing.T) {
 		enc := jqResponse(jqDoc)
-		enc.Encoding = "br"
-		enc.DecodeErr = errors.New("no decoder for \"br\"")
+		enc.Encoding = "compress"
+		enc.DecodeErr = errors.New("no decoder for \"compress\"")
 
 		_, err := enc.decodeJSON()
-		checkErrMatch(t, "decodeJSON", err, `^body: response is br-encoded`)
+		checkErrMatch(t, "decodeJSON", err, `^body: response is compress-encoded`)
 	})
 }

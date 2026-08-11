@@ -1,6 +1,7 @@
 package main_test
 
 import (
+	"bytes"
 	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
@@ -17,6 +18,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 )
 
 // The e2e suite talks to two real servers started once per test run: a plain
@@ -267,11 +271,39 @@ func testHandler() http.Handler {
 		_ = zw.Close()
 	})
 
-	// An encoding with no decoder here. Brotli is the realistic case; the bytes
-	// are not real brotli because nothing in the suite could produce them, and
-	// the CLI never gets far enough to care.
 	mux.HandleFunc("/brotli", func(w http.ResponseWriter, _ *http.Request) {
-		write(w, http.StatusOK, []byte{0x1b, 0x13, 0x00, 0x00, 0xa4, 0xb0, 0xb2},
+		var buf bytes.Buffer
+		bw := brotli.NewWriter(&buf)
+		_, _ = bw.Write([]byte(`{"status":"success"}`))
+		_ = bw.Close()
+		write(w, http.StatusOK, buf.Bytes(), http.Header{"Content-Encoding": {"br"}})
+	})
+
+	mux.HandleFunc("/zstd", func(w http.ResponseWriter, _ *http.Request) {
+		var buf bytes.Buffer
+		zw, err := zstd.NewWriter(&buf)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, _ = zw.Write([]byte(`{"status":"success"}`))
+		_ = zw.Close()
+		write(w, http.StatusOK, buf.Bytes(), http.Header{"Content-Encoding": {"zstd"}})
+	})
+
+	// An encoding with no decoder here, and the one place the suite needs a
+	// coding that will stay unsupported. RFC 9110 still registers `compress`
+	// (LZW), and effectively nothing serves it -- unlike br and zstd, which
+	// were the realistic examples right up until they were implemented.
+	mux.HandleFunc("/unsupported", func(w http.ResponseWriter, _ *http.Request) {
+		write(w, http.StatusOK, []byte(`{"status":"success"}`),
+			http.Header{"Content-Encoding": {"compress"}})
+	})
+
+	// Claims brotli and is not brotli. gzip-corrupt covers the same class, but
+	// only since br gained a decoder can a br body fail this way at all.
+	mux.HandleFunc("/brotli-corrupt", func(w http.ResponseWriter, _ *http.Request) {
+		write(w, http.StatusOK, []byte(`{"status":"success"}`),
 			http.Header{"Content-Encoding": {"br"}})
 	})
 

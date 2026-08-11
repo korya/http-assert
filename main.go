@@ -76,9 +76,9 @@
 // # Compression
 //
 // A compressed body is decoded before the assertions run, so --assert-body and
-// friends always see the payload. gzip and deflate are understood; an encoding
-// nothing here can remove fails the body assertions by name and leaves every
-// other assertion alone.
+// friends always see the payload. gzip, deflate, br and zstd are understood; an
+// encoding nothing here can remove fails the body assertions by name and leaves
+// every other assertion alone.
 //
 // The request advertises no Accept-Encoding of its own, and the response
 // headers are reported exactly as they arrived. net/http would decode only
@@ -107,6 +107,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -187,9 +189,10 @@ Retries:
 
 Compression:
   A compressed body is decoded before the assertions run, so --assert-body and
-  the other body assertions always see the payload. gzip and deflate are
-  understood; an encoding with no decoder here fails the body assertions by
-  name and leaves --assert-ok, --assert-status and --assert-header* alone.
+  the other body assertions always see the payload. gzip, deflate, br (brotli)
+  and zstd are understood; an encoding with no decoder here fails the body
+  assertions by name and leaves --assert-ok, --assert-status and
+  --assert-header* alone.
 
   Nothing is advertised in Accept-Encoding unless -H says so, and the response
   headers are reported exactly as they arrived -- so a body can be asserted on
@@ -1239,6 +1242,15 @@ func (r *httpResponse) decodeJSON() (any, error) {
 var decoders = map[string]func([]byte) ([]byte, error){
 	"gzip":    decodeGzip,
 	"deflate": decodeDeflate,
+	"br":      decodeBrotli,
+	"zstd":    decodeZstd,
+}
+
+// supportedCodings names the decoders in a stable order, so the failure for an
+// encoding with no decoder can say what it does have without drifting from the
+// map as it grows.
+func supportedCodings() string {
+	return strings.Join(slices.Sorted(maps.Keys(decoders)), ", ")
 }
 
 // decodeBody removes the Content-Encoding from BodyBytes, leaving every header
@@ -1263,7 +1275,7 @@ func (r *httpResponse) decodeBody() {
 	default:
 		decode, ok := decoders[enc]
 		if !ok {
-			r.DecodeErr = fmt.Errorf("no decoder for %q; gzip and deflate are supported", r.Encoding)
+			r.DecodeErr = fmt.Errorf("no decoder for %q; %s are supported", r.Encoding, supportedCodings())
 			return
 		}
 
@@ -1274,6 +1286,27 @@ func (r *httpResponse) decodeBody() {
 		}
 		r.BodyBytes = b
 	}
+}
+
+// decodeBrotli removes a brotli coding. There is no brotli in the standard
+// library, which is the whole reason this took a dependency; andybalholm/brotli
+// is pure Go and brings nothing else with it.
+func decodeBrotli(b []byte) ([]byte, error) {
+	return io.ReadAll(brotli.NewReader(bytes.NewReader(b)))
+}
+
+// decodeZstd removes a zstd coding (RFC 8878).
+//
+// klauspost/compress is a large repository, but only the zstd package links
+// into the binary, so the cost is the decoder rather than the library.
+func decodeZstd(b []byte) ([]byte, error) {
+	zr, err := zstd.NewReader(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+
+	return io.ReadAll(zr)
 }
 
 func decodeGzip(b []byte) ([]byte, error) {

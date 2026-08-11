@@ -111,28 +111,74 @@ func TestE2ECompressionHeadersSurvive(t *testing.T) {
 	})
 }
 
+// TestE2ECompressionBrotliZstd covers the two codings that cost a dependency.
+//
+// Both are what CDNs actually serve, so a body assertion against one is the
+// ordinary case rather than an exotic one (#77, #78).
+func TestE2ECompressionBrotliZstd(t *testing.T) {
+	for path, coding := range map[string]string{"/brotli": "br", "/zstd": "zstd"} {
+		t.Run(coding+" is decoded before the body assertions run", func(t *testing.T) {
+			assertExit(t, run(t, nil, "--assert-body", `"status":"success"`, url(path)), exitOK)
+			assertExit(t, run(t, nil, "--assert-body-eq", `{"status":"success"}`, url(path)), exitOK)
+		})
+
+		t.Run(coding+" decodes for --assert-jq too", func(t *testing.T) {
+			assertExit(t, run(t, nil, "--assert-jq", `.status == "success"`, url(path)), exitOK)
+		})
+
+		// Decoding must not rewrite what the response said about itself: the
+		// point of decoding by hand is to assert on the payload and on the
+		// Content-Encoding at the same time.
+		t.Run(coding+" is still reported as the encoding that arrived", func(t *testing.T) {
+			r := run(t, nil,
+				"--assert-header-eq", "Content-Encoding: "+coding,
+				"--assert-body", `"status":"success"`, url(path))
+			assertExit(t, r, exitOK)
+		})
+	}
+
+	// A decoder makes this failure reachable for br at all; without one the
+	// body never got as far as being malformed.
+	t.Run("a body that claims br and is not br fails the body assertions", func(t *testing.T) {
+		r := run(t, nil, "--assert-body", `"status":"success"`, url("/brotli-corrupt"))
+		assertExit(t, r, exitAssertFail)
+		assertContains(t, r, "body: response is br-encoded and was not decoded")
+	})
+
+	t.Run("a status check is unaffected by a corrupt br body", func(t *testing.T) {
+		assertExit(t, run(t, nil, "--assert-ok", url("/brotli-corrupt")), exitOK)
+	})
+}
+
 // TestE2ECompressionUndecodable covers an encoding with no decoder here.
 //
 // The response still has a status and headers worth asserting on, so only the
 // body assertions refuse. Failing the whole run would be simpler and would
-// break a status check against any CDN serving brotli.
+// break a status check against any CDN serving a coding this does not know.
 func TestE2ECompressionUndecodable(t *testing.T) {
 	t.Run("a status check is unaffected", func(t *testing.T) {
-		assertExit(t, run(t, nil, "--assert-ok", url("/brotli")), exitOK)
+		assertExit(t, run(t, nil, "--assert-ok", url("/unsupported")), exitOK)
 	})
 
 	t.Run("a header check is unaffected", func(t *testing.T) {
-		r := run(t, nil, "--assert-header-eq", "Content-Encoding: br", url("/brotli"))
+		r := run(t, nil, "--assert-header-eq", "Content-Encoding: compress", url("/unsupported"))
 		assertExit(t, r, exitOK)
 	})
 
 	t.Run("a body check refuses, and names the encoding", func(t *testing.T) {
-		r := run(t, nil, "--assert-body", `"status":"success"`, url("/brotli"))
+		r := run(t, nil, "--assert-body", `"status":"success"`, url("/unsupported"))
 		assertExit(t, r, exitAssertFail)
-		assertContains(t, r, "body: response is br-encoded and was not decoded")
-		assertContains(t, r, "no decoder for \"br\"")
+		assertContains(t, r, "body: response is compress-encoded and was not decoded")
+		assertContains(t, r, "no decoder for \"compress\"")
 		// The old failure was a bare hex dump with nothing explaining it.
-		assertContains(t, r, "<< Payload is br-encoded and was not decoded >>")
+		assertContains(t, r, "<< Payload is compress-encoded and was not decoded >>")
+	})
+
+	// The list in the failure is derived from the decoder map, so a coding
+	// added without updating the message is not possible.
+	t.Run("it names what it does support", func(t *testing.T) {
+		r := run(t, nil, "--assert-body", `"status":"success"`, url("/unsupported"))
+		assertContains(t, r, "br, deflate, gzip, zstd are supported")
 	})
 
 	// A header claiming an encoding the body does not have. Treating those

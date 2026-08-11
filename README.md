@@ -377,15 +377,15 @@ itself, and leaves the rest of the run intact:
 
 ```console
 $ http-assert --assert-body '"status":"success"' https://cdn.example.com/
-- body: response is br-encoded and was not decoded: no decoder for "br"; gzip and deflate are supported
+- body: response is compress-encoded and was not decoded: no decoder for "compress"; br, deflate, gzip, zstd are supported
 
 $ http-assert --assert-ok https://cdn.example.com/
 [+] PASSED 38ms
 ```
 
-Brotli (`br`) and zstd are the encodings this covers in practice. Neither is
-supported yet: [#77](https://github.com/korya/http-assert/issues/77) tracks
-brotli and [#78](https://github.com/korya/http-assert/issues/78) tracks zstd.
+gzip, deflate, brotli (`br`) and zstd are decoded. Brotli and zstd each cost a
+dependency, which is why they are named here rather than assumed: they are what
+CDNs actually serve, and a body assertion against one is the ordinary case.
 
 A header that claims an encoding the body does not have is treated the same
 way. Reading those bytes as plain text would be its own silent corruption.
@@ -604,7 +604,7 @@ a tool whose job is checking. This is the complete list:
 | `-d @file` | reads the file | sends the literal string `@file` |
 | `-d` repeated | values joined with `&` | rejected, exit `71` |
 | `--retry` | transport errors and a fixed set of transient statuses, exponential backoff | any failed attempt, assertion failures included, fixed delay |
-| Response decompression | opt-in via `--compressed` | always: gzip and deflate are decoded before assertions run |
+| Response decompression | opt-in via `--compressed` | always: gzip, deflate, br and zstd are decoded before assertions run |
 | Pointing at a backend | `--resolve host:port:addr` takes an address | `--maphost 'host:port=dst[:port]'` takes a hostname or an address |
 
 ## License

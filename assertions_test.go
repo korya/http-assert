@@ -729,8 +729,8 @@ func Test_AssertionCheckSeparatesFailureFromError(t *testing.T) {
 
 	t.Run("an undecodable body is an error, not a Failure", func(t *testing.T) {
 		res := &httpResponse{
-			Encoding:  "br",
-			DecodeErr: errors.New(`no decoder for "br"`),
+			Encoding:  "compress",
+			DecodeErr: errors.New(`no decoder for "compress"`),
 		}
 
 		for name, a := range map[string]Assertion{
@@ -755,8 +755,8 @@ func Test_AssertionCheckSeparatesFailureFromError(t *testing.T) {
 	t.Run("a status assertion is unaffected by an undecodable body", func(t *testing.T) {
 		res := &httpResponse{
 			Response:  &http.Response{StatusCode: 200, Status: "200 OK"},
-			Encoding:  "br",
-			DecodeErr: errors.New(`no decoder for "br"`),
+			Encoding:  "compress",
+			DecodeErr: errors.New(`no decoder for "compress"`),
 		}
 
 		f, err := AssertStatusOK().Check(res)
