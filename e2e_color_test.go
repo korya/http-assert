@@ -66,6 +66,29 @@ func TestE2EColor(t *testing.T) {
 		assertContains(t, r, "\033[32m[+] PASSED")
 	})
 
+	// A retry is the one trace line reporting trouble that is not the verdict,
+	// so it is neither dimmed with the rest of the trace nor red like a
+	// failure: a run that passed on the fourth attempt is not the same news as
+	// one that passed on the first.
+	t.Run("--color=always makes the retry line yellow", func(t *testing.T) {
+		r := run(t, nil, "--color=always", "--retry", "2", "--retry-delay", "10ms",
+			"--assert-ok", url("/500"))
+		assertExit(t, r, exitAssertFail)
+		assertContains(t, r, "\033[33m[~] retry 1/2")
+		assertNotContains(t, r, "\033[2m[~]")
+
+		// The verdict it leads to is still red, and still distinguishable.
+		assertContains(t, r, "\033[31m[-] FAILED")
+	})
+
+	t.Run("a retry that recovers still colours the retry yellow", func(t *testing.T) {
+		r := run(t, nil, "--color=always", "--retry", "3", "--retry-delay", "10ms",
+			"--assert-ok", flaky(t, "/flaky", 1))
+		assertExit(t, r, exitOK)
+		assertContains(t, r, "\033[33m[~] retry 1/3")
+		assertContains(t, r, "\033[32m[+] PASSED")
+	})
+
 	t.Run("an unknown value is rejected", func(t *testing.T) {
 		r := run(t, nil, "--color=purple", "--assert-ok", url("/ok"))
 		assertExit(t, r, exitBadInvocation)

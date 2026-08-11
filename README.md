@@ -414,8 +414,11 @@ way. Reading those bytes as plain text would be its own silent corruption.
 
 `auto` colours only when stderr is a terminal, so a pipe or a CI log stays
 plain without being asked for. The verdict is green or red and the `[.]` `[:]`
-`[>]` `[~]` lines are dimmed; the failure list itself stays plain so it can be
-copied out of a terminal unchanged. `NO_COLOR` is honoured — any non-empty
+`[>]` trace lines are dimmed. `[~]` is yellow — a retry is the one line that
+reports trouble without being the verdict, and a check that passed on the
+fourth attempt is not the same news as one that passed on the first. The
+failure list itself stays plain so it can be copied out of a terminal
+unchanged. `NO_COLOR` is honoured — any non-empty
 value turns `auto` off — and `--color=always` overrides it, on the grounds that
 the variable says what to do absent an instruction and the flag is one.
 
