@@ -203,7 +203,20 @@ Compression:
 
   Nothing is advertised in Accept-Encoding unless -H says so, and the response
   headers are reported exactly as they arrived -- so a body can be asserted on
-  and its Content-Encoding at the same time.`,
+  and its Content-Encoding at the same time.
+
+Colour:
+  --color decides whether the sigil lines and Error: carry ANSI colour. auto,
+  the default, colours only when stderr is a terminal, so a pipe or a CI log
+  stays plain without being asked. always and never say so outright.
+
+  NO_COLOR is honoured: any non-empty value turns auto off. --color=always
+  still wins over it, on the grounds that a variable says what to do in the
+  absence of an instruction and the flag is one.
+
+  The verdict is green or red; the [.] [:] [>] [~] lines leading up to it are
+  dimmed. Nothing else is coloured -- the failure list stays plain so it can be
+  copied out of a terminal unchanged.`,
 		Example: `  # A health check: any non-error status passes
   http-assert --assert-ok https://example.com/health
 
@@ -227,6 +240,11 @@ Compression:
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Run: func(cmd *cobra.Command, args []string) {
+			// Resolved first, so every message after this point -- including
+			// the ones dief writes about other flags -- is coloured the way
+			// the caller asked.
+			mustSetPalette(cmd)
+
 			insecure, _ := cmd.Flags().GetBool("insecure")
 			maxTime, _ := cmd.Flags().GetInt("max-time")
 			maphost, _ := cmd.Flags().GetStringArray("maphost")
@@ -237,6 +255,7 @@ Compression:
 			retryMaxTime, _ := cmd.Flags().GetDuration("retry-max-time")
 			c := Client{
 				LogLevel:        mustParseLogLevel(cmd),
+				Palette:         errPalette,
 				SkipSslChecks:   insecure,
 				Timeout:         time.Duration(maxTime) * time.Second,
 				HostMappings:    mustParseHostMappings(maphost),
@@ -310,6 +329,8 @@ Compression:
 		"Be silent; log error messages only (same as --log-level error; overrides -v)")
 	cmd.PersistentFlags().String("log-level", "",
 		"Set log level; possible values: debug, info (default), warn, error")
+	cmd.PersistentFlags().String("color", "auto",
+		"Colour the verdict; possible values: auto (default), always, never")
 	cmd.PersistentFlags().BoolP("insecure", "k", false, "Disable checking SSL certificates")
 	cmd.PersistentFlags().IntP("max-time", "m", 20,
 		"Maximum time in seconds that you allow each request to take")
@@ -484,11 +505,117 @@ type exitError struct {
 func (e *exitError) Error() string { return e.msg }
 
 // dief formats a message to stderr and terminates the process with rc.
+// ANSI colours, kept to the three the verdict needs. A 16-colour palette works
+// on everything that renders escapes at all, so there is no capability to
+// probe beyond "is anyone watching".
+const (
+	ansiReset = "\033[0m"
+	ansiRed   = "\033[31m"
+	ansiGreen = "\033[32m"
+	ansiDim   = "\033[2m"
+)
+
+// palette decides whether a line is written with colour. The zero value writes
+// none, so any path that runs before the flags are parsed stays plain.
+type palette struct{ on bool }
+
+// errPalette colours the one line dief writes. It is a package variable
+// because dief is reachable from flag parsing, before there is a Client to
+// hang it on; until the flags resolve it is the zero value, so an error raised
+// on the way there is plain rather than half-coloured.
+var errPalette palette
+
+func (p palette) wrap(code, s string) string {
+	if !p.on || s == "" {
+		return s
+	}
+
+	return code + s + ansiReset
+}
+
+// line colours a log line by its sigil.
+//
+// The sigil vocabulary already says what each line is; colour only makes the
+// distinction survive a scroll through a CI log, which is the whole complaint
+// (#98). The verdict is green or red, and the four lines that lead up to it are
+// dimmed so the verdict is what the eye lands on. Dimming [.] and [:] but not
+// [>] and [~] would leave the rarer trace lines louder than the common ones.
+func (p palette) line(s string) string {
+	if !p.on {
+		return s
+	}
+
+	// The trailing newlines are outside the sequence: a reset after a blank
+	// line leaves the colour spanning it, which some terminals paint.
+	body := strings.TrimRight(s, "\n")
+	tail := s[len(body):]
+
+	switch {
+	case strings.HasPrefix(body, "[+]"):
+		body = p.wrap(ansiGreen, body)
+	case strings.HasPrefix(body, "[-]"):
+		body = p.wrap(ansiRed, body)
+	case strings.HasPrefix(body, "[.]"), strings.HasPrefix(body, "[:]"),
+		strings.HasPrefix(body, "[>]"), strings.HasPrefix(body, "[~]"):
+		body = p.wrap(ansiDim, body)
+	}
+
+	return body + tail
+}
+
+// isTerminal reports whether anything is watching f.
+//
+// A character device is the stdlib's answer to the question, and it is the
+// whole of the platform handling here: a terminal that cannot render escapes
+// is rarer than the dependency needed to detect one, and --color=never and
+// NO_COLOR both exist for it.
+func isTerminal(f *os.File) bool {
+	st, err := f.Stat()
+
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
+}
+
+// shouldColor resolves --color against NO_COLOR and the terminal.
+//
+// Taking all three as arguments keeps the decision testable without a terminal
+// or a mutated environment, which is what made it worth separating from the
+// wiring at all.
+//
+// --color=always wins over NO_COLOR: the variable says what to do absent an
+// instruction, and the flag is an instruction. NO_COLOR beats a bare terminal,
+// which is the case it exists for.
+func shouldColor(mode, noColor string, isTTY bool) (bool, error) {
+	switch mode {
+	case "never":
+		return false, nil
+	case "always":
+		return true, nil
+	case "auto":
+		return noColor == "" && isTTY, nil
+	}
+
+	return false, fmt.Errorf("possible values: auto, always, never")
+}
+
+// mustSetPalette resolves --color once and hands the answer to both writers.
+//
+// stderr is the subject because that is where every line this colours goes;
+// asking about stdout would answer a question nobody is writing to.
+func mustSetPalette(cmd *cobra.Command) {
+	mode, _ := cmd.Flags().GetString("color")
+	on, err := shouldColor(mode, os.Getenv("NO_COLOR"), isTerminal(os.Stderr))
+	if err != nil {
+		dief(exitBadInvocation, "Invalid value for --color flag: %q: %s", mode, err)
+	}
+
+	errPalette = palette{on: on}
+}
+
 func dief(rc int, format string, args ...interface{}) {
 	if !strings.HasSuffix(format, "\n") {
 		format += "\n"
 	}
-	fmt.Fprintf(os.Stderr, "\nError: "+format, args...)
+	fmt.Fprintf(os.Stderr, "\n%s "+format, append([]interface{}{errPalette.wrap(ansiRed, "Error:")}, args...)...)
 	os.Exit(rc)
 }
 
@@ -847,7 +974,9 @@ func parseHeaderAssertions(vs []string, exactMatch bool) []Assertion {
 }
 
 type Client struct {
-	LogLevel      LogLevel
+	LogLevel LogLevel
+	// Palette colours the sigil lines. The zero value writes none.
+	Palette       palette
 	SkipSslChecks bool
 	Timeout       time.Duration
 	HostMappings  []hostMapping
@@ -1187,7 +1316,7 @@ func (c Client) log(l LogLevel, format string, args ...interface{}) {
 	if !strings.HasSuffix(format, "\n") {
 		format += "\n"
 	}
-	fmt.Fprintf(os.Stderr, format, args...)
+	fmt.Fprint(os.Stderr, c.Palette.line(fmt.Sprintf(format, args...)))
 }
 
 type httpResponse struct {

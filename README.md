@@ -407,9 +407,17 @@ way. Reading those bytes as plain text would be its own silent corruption.
 | `--verbose` | `-v` | Enable verbose logging (overrides `--log-level`) |
 | `--silent` | `-s` | Only log errors (overrides `-v`) |
 | `--log-level` | | Set log level (debug, info, warn, error) |
+| `--color` | | Colour the verdict: `auto` (default), `always`, `never` |
 
 **Everything the tool prints goes to stderr; stdout is always empty.** Use
 `2>&1` when capturing output in a file or a pipe.
+
+`auto` colours only when stderr is a terminal, so a pipe or a CI log stays
+plain without being asked for. The verdict is green or red and the `[.]` `[:]`
+`[>]` `[~]` lines are dimmed; the failure list itself stays plain so it can be
+copied out of a terminal unchanged. `NO_COLOR` is honoured — any non-empty
+value turns `auto` off — and `--color=always` overrides it, on the grounds that
+the variable says what to do absent an instruction and the flag is one.
 
 `warn` is accepted but currently logs exactly what `error` does; nothing in the
 tool logs at the warn level.
