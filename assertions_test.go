@@ -137,8 +137,8 @@ func Test_AssertHeader(t *testing.T) {
 				"Target": []string{""},
 				"two":    []string{"value", "v", "2"},
 			},
-			ExpEqualError: `header[taRgET]: expected "value", got [""]`,
-			ExpMatchError: `header[taRget]: expected to match "(?i)^val.*$", got [""]`,
+			ExpEqualError: `header[taRgET]: expected "value", got ""`,
+			ExpMatchError: `header[taRget]: expected to match "(?i)^val.*$", got ""`,
 		},
 		{
 			CaseName: "Non-empty but non-matching value",
@@ -147,8 +147,8 @@ func Test_AssertHeader(t *testing.T) {
 				"Target": []string{"v"},
 				"two":    []string{"value", "v", "2"},
 			},
-			ExpEqualError: `header[taRgET]: expected "value", got ["v"]`,
-			ExpMatchError: `header[taRget]: expected to match "(?i)^val.*$", got ["v"]`,
+			ExpEqualError: `header[taRgET]: expected "value", got "v"`,
+			ExpMatchError: `header[taRget]: expected to match "(?i)^val.*$", got "v"`,
 		},
 		{
 			CaseName: "Matching value",
@@ -157,7 +157,7 @@ func Test_AssertHeader(t *testing.T) {
 				"Target": []string{"vAl"},
 				"two":    []string{"value", "v", "2"},
 			},
-			ExpEqualError: `header[taRgET]: expected "value", got ["vAl"]`,
+			ExpEqualError: `header[taRgET]: expected "value", got "vAl"`,
 		},
 		{
 			CaseName: "Exact value",
@@ -175,8 +175,8 @@ func Test_AssertHeader(t *testing.T) {
 				"Target": []string{"one", "two", "three"},
 				"two":    []string{"value", "v", "2"},
 			},
-			ExpEqualError: `header[taRgET]: expected "value", got ["one" "two" "three"]`,
-			ExpMatchError: `header[taRget]: expected to match "(?i)^val.*$", got ["one" "two" "three"]`,
+			ExpEqualError: `header[taRgET]: expected "value", got "one", "two", "three"`,
+			ExpMatchError: `header[taRget]: expected to match "(?i)^val.*$", got "one", "two", "three"`,
 		},
 		{
 			CaseName: "Multple: Matching value",
@@ -185,7 +185,7 @@ func Test_AssertHeader(t *testing.T) {
 				"Target": []string{"one", "two", "vAl", "three"},
 				"two":    []string{"value", "v", "2"},
 			},
-			ExpEqualError: `header[taRgET]: expected "value", got ["one" "two" "vAl" "three"]`,
+			ExpEqualError: `header[taRgET]: expected "value", got "one", "two", "vAl", "three"`,
 		},
 		{
 			CaseName: "Multple: Exact value",
@@ -219,7 +219,7 @@ func Test_AssertHeader(t *testing.T) {
 				checkErr(t, "present", check(present, res), "")
 				// The values are echoed back, so match rather than pin them.
 				checkErrMatch(t, "missing", check(missing, res),
-					`header\[taRgEt\]: expected to be missing, got \[.*\]$`)
+					`header\[taRgEt\]: expected to be missing, got ".*"$`)
 			}
 
 			checkErr(t, "equal", check(equal, res), tc.ExpEqualError)

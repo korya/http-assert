@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/itchyny/gojq"
@@ -82,6 +84,22 @@ func newAssertion(kind string, check func(res *httpResponse) (*Failure, error)) 
 // response exists. They return an error rather than panicking; every other
 // constructor in this file is infallible and returns an Assertion directly.
 
+// headerValues renders a header's values the way the response carried them.
+//
+// A header can appear more than once, so the values are a list -- but %q on a
+// []string prints Go's own syntax, and `got ["abc123"]` told a user reading a
+// failure about a single-valued header that something bracketed had happened
+// to their value (#97). One value now reads as one value, and several read as
+// a list a person would write.
+func headerValues(vs []string) string {
+	quoted := make([]string, len(vs))
+	for i, v := range vs {
+		quoted[i] = strconv.Quote(v)
+	}
+
+	return strings.Join(quoted, ", ")
+}
+
 func AssertStatusOK() Assertion {
 	return newAssertion("ok", func(res *httpResponse) (*Failure, error) {
 		if s := res.StatusCode; s < 200 || s >= 400 {
@@ -149,8 +167,8 @@ func AssertHeaderMissing(name string) Assertion {
 				Target:   name,
 				Expected: "missing",
 				Actual:   vs,
-				Message: fmt.Sprintf("header[%s]: expected to be missing, got %q",
-					name, vs),
+				Message: fmt.Sprintf("header[%s]: expected to be missing, got %s",
+					name, headerValues(vs)),
 			}, nil
 		}
 
@@ -180,8 +198,8 @@ func AssertHeaderEqual(name, expValue string) Assertion {
 			Target:   name,
 			Expected: expValue,
 			Actual:   vs,
-			Message: fmt.Sprintf("header[%s]: expected %q, got %q",
-				name, expValue, vs),
+			Message: fmt.Sprintf("header[%s]: expected %q, got %s",
+				name, expValue, headerValues(vs)),
 		}, nil
 	})
 }
@@ -213,8 +231,8 @@ func AssertHeaderMatch(name, expPattern string) (Assertion, error) {
 			Target:   name,
 			Expected: expPattern,
 			Actual:   vs,
-			Message: fmt.Sprintf("header[%s]: expected to match %q, got %q",
-				name, expPattern, vs),
+			Message: fmt.Sprintf("header[%s]: expected to match %q, got %s",
+				name, expPattern, headerValues(vs)),
 		}, nil
 	}), nil
 }

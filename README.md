@@ -161,8 +161,8 @@ A `-H` value needs a colon. A bare name exits `71` rather than being sent as a h
 |------|-------------|
 | `--assert-ok` | Assert the status is not an error (2xx or 3xx) |
 | `--assert-status` | Assert specific status code |
-| `--assert-header` | Assert header matches regex pattern; a name alone asserts presence |
-| `--assert-header-eq` | Assert header equals exact value; a name alone asserts presence |
+| `--assert-header` | Assert any value of the header matches a regex; a name alone asserts presence |
+| `--assert-header-eq` | Assert any value of the header equals the given value; a name alone asserts presence |
 | `--assert-header-missing` | Assert header is not present |
 | `--assert-body` | Assert body matches regex pattern |
 | `--assert-body-eq` | Assert body equals exact value |
@@ -172,6 +172,16 @@ A `-H` value needs a colon. A bare name exits `71` rather than being sent as a h
 | `--assert-redirect-eq` | Assert redirect location equals exact value |
 
 The three header flags and `--assert-jq` can be repeated to make several assertions of that kind. Every other assertion flag takes a single value; giving one twice exits `71` rather than silently keeping the last.
+
+A response header can carry several values, which is a different thing from repeating the flag. `Set-Cookie` routinely does, and `--assert-header` and `--assert-header-eq` hold when **any** value matches:
+
+```console
+# The response sets three cookies; this passes on the strength of one of them.
+$ http-assert --assert-header-eq 'Set-Cookie: session=abc' https://example.com/login
+[+] PASSED 41ms
+```
+
+That is usually what you want, and it is worth knowing before you read `--assert-header-eq` as a claim about the only value. `--assert-header-missing` is the strict one: it fails if the header carries any value at all.
 
 `--assert-ok` and `--assert-body-empty` can be negated with `=false`, which asserts the opposite rather than cancelling the flag:
 
