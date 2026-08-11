@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -595,4 +597,171 @@ func Test_AssertMatchConstructorsRejectBadPatterns(t *testing.T) {
 			})
 		})
 	}
+}
+
+// Test_AssertionIdentity pins the structure assertions gained when Assertion
+// became an interface (#56): every assertion names its kind, and a failure
+// carries the parts of its sentence as data rather than only the sentence.
+//
+// These are the fields #45 serializes, so a change here is a change to the
+// machine-readable contract, not an internal detail. The Message is covered by
+// the tables above and deliberately not repeated.
+func Test_AssertionIdentity(t *testing.T) {
+	t.Parallel()
+
+	statusRes := func(code int, status string) *httpResponse {
+		return &httpResponse{
+			Response: &http.Response{StatusCode: code, Status: status},
+		}
+	}
+	headerRes := func(h http.Header) *httpResponse {
+		return &httpResponse{
+			Response: &http.Response{StatusCode: 200, Status: "200 OK", Header: h},
+		}
+	}
+
+	jq, err := AssertJQ(".n == 1")
+	if err != nil {
+		t.Fatalf("cannot build the jq assertion: %s", err)
+	}
+
+	tests := []struct {
+		Name      string
+		Assertion Assertion
+		Res       *httpResponse
+		Kind      string
+		Target    string
+		Expected  any
+		Actual    any
+	}{
+		{
+			Name: "ok", Assertion: AssertStatusOK(),
+			Res:  statusRes(500, "500 Internal Server Error"),
+			Kind: "ok", Expected: "2xx-3xx", Actual: 500,
+		},
+		{
+			Name: "nok", Assertion: AssertStatusNOK(),
+			Res:  statusRes(200, "200 OK"),
+			Kind: "nok", Expected: "not 2xx-3xx", Actual: 200,
+		},
+		{
+			Name: "status", Assertion: AssertStatusEqual(200),
+			Res:  statusRes(500, "500 Internal Server Error"),
+			Kind: "status", Expected: 200, Actual: 500,
+		},
+		{
+			Name: "header present", Assertion: AssertHeaderPresent("X-Absent"),
+			Res:  headerRes(http.Header{}),
+			Kind: "header", Target: "X-Absent", Expected: "present",
+		},
+		{
+			Name: "header equal", Assertion: AssertHeaderEqual("X-A", "want"),
+			Res:  headerRes(http.Header{"X-A": []string{"got"}}),
+			Kind: "header", Target: "X-A", Expected: "want", Actual: []string{"got"},
+		},
+		{
+			Name: "body equal", Assertion: AssertBodyEqual("want"),
+			Res:  &httpResponse{BodyBytes: []byte("got")},
+			Kind: "body", Expected: "want", Actual: "got",
+		},
+		{
+			Name: "redirect", Assertion: AssertRedirectEqual("/there"),
+			Res: headerRes(http.Header{"Location": []string{"/elsewhere"}}),
+			// A 200 never reaches the Location comparison, so this is the
+			// precondition failure, which reports the status it wanted.
+			Kind: "redirect", Expected: "3xx", Actual: 200,
+		},
+		{
+			Name: "jq", Assertion: jq, Res: jqResponse(`{"n":2}`),
+			Kind: "jq", Target: ".n == 1", Expected: true, Actual: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			if got := tc.Assertion.Kind(); got != tc.Kind {
+				t.Errorf("Kind() = %q, want %q", got, tc.Kind)
+			}
+
+			f, err := tc.Assertion.Check(tc.Res)
+			if err != nil {
+				t.Fatalf("unexpected evaluation error: %s", err)
+			}
+			if f == nil {
+				t.Fatal("expected a Failure, got none")
+			}
+
+			// Kind is stamped by Check rather than written by each
+			// constructor, so the two can never drift apart.
+			if f.Kind != tc.Kind {
+				t.Errorf("Failure.Kind = %q, want %q", f.Kind, tc.Kind)
+			}
+			if f.Target != tc.Target {
+				t.Errorf("Target = %q, want %q", f.Target, tc.Target)
+			}
+			if !reflect.DeepEqual(f.Expected, tc.Expected) {
+				t.Errorf("Expected = %#v, want %#v", f.Expected, tc.Expected)
+			}
+			if !reflect.DeepEqual(f.Actual, tc.Actual) {
+				t.Errorf("Actual = %#v, want %#v", f.Actual, tc.Actual)
+			}
+			if f.Message == "" {
+				t.Error("Message is empty; the human path reads this")
+			}
+		})
+	}
+}
+
+// Test_AssertionCheckSeparatesFailureFromError covers the distinction the
+// interface exists to draw: a response that was read and disagreed is a
+// Failure, and one that could not be evaluated at all is an error. Both still
+// fail the run -- doOnce collects them into one list -- but only one of them
+// has an Expected and an Actual to report.
+func Test_AssertionCheckSeparatesFailureFromError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an assertion that holds reports neither", func(t *testing.T) {
+		f, err := AssertBodyEqual("same").Check(&httpResponse{BodyBytes: []byte("same")})
+		if f != nil || err != nil {
+			t.Errorf("got (%v, %v), want (nil, nil)", f, err)
+		}
+	})
+
+	t.Run("an undecodable body is an error, not a Failure", func(t *testing.T) {
+		res := &httpResponse{
+			Encoding:  "br",
+			DecodeErr: errors.New(`no decoder for "br"`),
+		}
+
+		for name, a := range map[string]Assertion{
+			"body equal": AssertBodyEqual("x"),
+			"body empty": AssertBodyEmpty(),
+		} {
+			t.Run(name, func(t *testing.T) {
+				f, err := a.Check(res)
+				if f != nil {
+					t.Errorf("got a Failure %+v; an unevaluable assertion has no Expected/Actual", f)
+				}
+				if err == nil {
+					t.Fatal("expected an evaluation error, got nil")
+				}
+				if !strings.Contains(err.Error(), "was not decoded") {
+					t.Errorf("error = %q, want it to name the encoding problem", err)
+				}
+			})
+		}
+	})
+
+	t.Run("a status assertion is unaffected by an undecodable body", func(t *testing.T) {
+		res := &httpResponse{
+			Response:  &http.Response{StatusCode: 200, Status: "200 OK"},
+			Encoding:  "br",
+			DecodeErr: errors.New(`no decoder for "br"`),
+		}
+
+		f, err := AssertStatusOK().Check(res)
+		if f != nil || err != nil {
+			t.Errorf("got (%v, %v), want (nil, nil)", f, err)
+		}
+	})
 }
