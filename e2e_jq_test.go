@@ -177,9 +177,9 @@ func TestE2EAssertJQBodyProblems(t *testing.T) {
 
 	// An encoding nothing can decode reports the encoding, not invalid JSON.
 	t.Run("a body still encoded", func(t *testing.T) {
-		r := run(t, nil, "--assert-jq", `. == 1`, url("/brotli"))
+		r := run(t, nil, "--assert-jq", `. == 1`, url("/unsupported"))
 		assertExit(t, r, exitAssertFail)
-		assertContains(t, r, "body: response is br-encoded")
+		assertContains(t, r, "body: response is compress-encoded")
 	})
 
 	// A query yielding nothing has checked nothing, so it must not pass.

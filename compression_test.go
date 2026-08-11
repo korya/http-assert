@@ -145,10 +145,10 @@ func Test_decodeBody(t *testing.T) {
 		},
 		{
 			Name:         "an encoding with no decoder here",
-			Enc:          "br",
-			Body:         []byte{0x1b, 0x13, 0x00},
+			Enc:          "compress",
+			Body:         []byte("payload"),
 			WantErr:      true,
-			WantEncoding: "br",
+			WantEncoding: "compress",
 		},
 		{
 			// The header claims gzip and the bytes are not. Silently asserting
@@ -246,11 +246,11 @@ func Test_bodyOf(t *testing.T) {
 	})
 
 	t.Run("an undecoded body is refused, and says why", func(t *testing.T) {
-		res := encoded("br", []byte{0x1b, 0x13, 0x00})
+		res := encoded("compress", []byte("payload"))
 		res.decodeBody()
 
 		_, err := bodyOf(res)
-		checkErrMatch(t, "bodyOf", err, `^body: response is br-encoded and was not decoded: `)
+		checkErrMatch(t, "bodyOf", err, `^body: response is compress-encoded and was not decoded: `)
 	})
 }
 
@@ -275,10 +275,10 @@ func Test_bodyAssertionsRefuseAnEncodedBody(t *testing.T) {
 
 	for name, a := range assertions {
 		t.Run(name, func(t *testing.T) {
-			res := encoded("br", []byte{0x1b, 0x13, 0x00})
+			res := encoded("compress", []byte("payload"))
 			res.decodeBody()
 
-			checkErrMatch(t, name, check(a, res), `^body: response is br-encoded and was not decoded: `)
+			checkErrMatch(t, name, check(a, res), `^body: response is compress-encoded and was not decoded: `)
 		})
 	}
 }
