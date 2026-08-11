@@ -100,6 +100,128 @@ func headerValues(vs []string) string {
 	return strings.Join(quoted, ", ")
 }
 
+// Status codes a response can actually carry. net/http refuses to write
+// anything outside this range -- 99 and 1000 panic in WriteHeader -- so a spec
+// naming one of them is a typo in the invocation rather than a fact about the
+// service, and it is rejected before a request is made.
+//
+// The upper bound is 999 rather than 599 because 6xx-9xx are non-conformant
+// but observable: a server can send them and net/http reports them faithfully,
+// so an assertion about one is answerable.
+const (
+	statusMin = 100
+	statusMax = 999
+)
+
+// statusRange is an inclusive span of status codes. A single code is a span of
+// one, so every form --assert-status accepts reduces to the same shape.
+type statusRange struct{ lo, hi int }
+
+// statusSpec is the set of status codes an assertion will accept.
+//
+// text is kept as the caller wrote it: a failure saying `expected 2xx` is the
+// question they asked, where `expected 200-299` would be an answer they would
+// have to translate back.
+type statusSpec struct {
+	text   string
+	ranges []statusRange
+}
+
+func (s statusSpec) matches(code int) bool {
+	for _, r := range s.ranges {
+		if code >= r.lo && code <= r.hi {
+			return true
+		}
+	}
+
+	return false
+}
+
+// parseStatusSpec reads the forms --assert-status accepts: an exact code, a
+// class like 2xx, an inclusive range like 401-403, or a comma-separated list
+// mixing any of them.
+//
+// Parsed by hand rather than by regexp, which the linter forbids compiling
+// from user input anyway, and which would be longer than the three cases it
+// replaced.
+func parseStatusSpec(text string) (statusSpec, error) {
+	spec := statusSpec{text: text}
+	if strings.TrimSpace(text) == "" {
+		return spec, fmt.Errorf("it is empty; give a status code, a class like 2xx, or a range like 401-403")
+	}
+
+	for _, term := range strings.Split(text, ",") {
+		r, err := parseStatusTerm(strings.TrimSpace(term))
+		if err != nil {
+			return spec, err
+		}
+		spec.ranges = append(spec.ranges, r)
+	}
+
+	return spec, nil
+}
+
+func parseStatusTerm(term string) (statusRange, error) {
+	if term == "" {
+		return statusRange{}, fmt.Errorf("it has an empty entry; remove the stray comma")
+	}
+
+	// A class: the leading digit fixes the hundred, xx covers the rest.
+	if len(term) == 3 && isX(term[1]) && isX(term[2]) {
+		d := term[0]
+		if d < '1' || d > '9' {
+			return statusRange{}, fmt.Errorf("%q is not a status class; the leading digit is 1 to 9", term)
+		}
+		lo := int(d-'0') * 100
+
+		return statusRange{lo, lo + 99}, nil
+	}
+
+	// A range. Both ends must be present, so a negative number falls through
+	// to be reported as the code it is not, rather than as a range with an
+	// empty low end -- which named "" in the error and not what was typed.
+	if loText, hiText, isRange := strings.Cut(term, "-"); isRange && loText != "" && hiText != "" {
+		lo, err := parseStatusCode(loText)
+		if err != nil {
+			return statusRange{}, err
+		}
+		hi, err := parseStatusCode(hiText)
+		if err != nil {
+			return statusRange{}, err
+		}
+		if lo > hi {
+			return statusRange{}, fmt.Errorf("range %q counts down; write it low to high", term)
+		}
+
+		return statusRange{lo, hi}, nil
+	}
+
+	code, err := parseStatusCode(term)
+
+	return statusRange{code, code}, err
+}
+
+func isX(b byte) bool { return b == 'x' || b == 'X' }
+
+func parseStatusCode(text string) (int, error) {
+	if len(text) != 3 {
+		return 0, fmt.Errorf("%q is not a three-digit status code", text)
+	}
+	for i := 0; i < len(text); i++ {
+		if text[i] < '0' || text[i] > '9' {
+			return 0, fmt.Errorf("%q is not a three-digit status code", text)
+		}
+	}
+
+	code, _ := strconv.Atoi(text) // three digits, so it cannot overflow
+	if code < statusMin || code > statusMax {
+		return 0, fmt.Errorf("no response can carry status %s; codes run %d to %d",
+			text, statusMin, statusMax)
+	}
+
+	return code, nil
+}
+
 func AssertStatusOK() Assertion {
 	return newAssertion("ok", func(res *httpResponse) (*Failure, error) {
 		if s := res.StatusCode; s < 200 || s >= 400 {
@@ -130,14 +252,15 @@ func AssertStatusNOK() Assertion {
 	})
 }
 
-func AssertStatusEqual(expStatus int) Assertion {
+// AssertStatus holds when the response carries any status the spec names.
+func AssertStatus(spec statusSpec) Assertion {
 	return newAssertion("status", func(res *httpResponse) (*Failure, error) {
-		if res.StatusCode != expStatus {
+		if !spec.matches(res.StatusCode) {
 			return &Failure{
-				Expected: expStatus,
+				Expected: spec.text,
 				Actual:   res.StatusCode,
-				Message: fmt.Sprintf("status: expected %d, got %d (%q)",
-					expStatus, res.StatusCode, res.Status),
+				Message: fmt.Sprintf("status: expected %s, got %d (%q)",
+					spec.text, res.StatusCode, res.Status),
 			}, nil
 		}
 

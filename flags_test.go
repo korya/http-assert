@@ -80,7 +80,7 @@ func Test_rejectRepeats(t *testing.T) {
 	t.Parallel()
 
 	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	fs.Int("assert-status", 0, "")
+	fs.String("assert-status", "", "")
 	fs.String("assert-body", "", "")
 	fs.Bool("assert-ok", false, "")
 	fs.StringArray("assert-header", nil, "")
@@ -117,11 +117,11 @@ func Test_checkRepeats_allows(t *testing.T) {
 	t.Parallel()
 
 	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	fs.Int("assert-status", 0, "")
+	fs.String("assert-status", "", "")
 	fs.StringArray("assert-header", nil, "")
 	rejectRepeats(fs)
 
-	if err := fs.Parse([]string{"--assert-status", "1", "--assert-header", "a", "--assert-header", "b"}); err != nil {
+	if err := fs.Parse([]string{"--assert-status", "200", "--assert-header", "a", "--assert-header", "b"}); err != nil {
 		t.Fatalf("parse: %s", err)
 	}
 

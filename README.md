@@ -160,7 +160,7 @@ A `-H` value needs a colon. A bare name exits `71` rather than being sent as a h
 | Flag | Description |
 |------|-------------|
 | `--assert-ok` | Assert the status is not an error (2xx or 3xx) |
-| `--assert-status` | Assert specific status code |
+| `--assert-status` | Assert the status: a code, a class like `2xx`, a range like `401-403`, or a list |
 | `--assert-header` | Assert any value of the header matches a regex; a name alone asserts presence |
 | `--assert-header-eq` | Assert any value of the header equals the given value; a name alone asserts presence |
 | `--assert-header-missing` | Assert header is not present |
@@ -170,6 +170,21 @@ A `-H` value needs a colon. A bare name exits `71` rather than being sent as a h
 | `--assert-jq` | Assert a jq expression yields `true` (can be used multiple times) |
 | `--assert-redirect` | Assert redirect location matches regex |
 | `--assert-redirect-eq` | Assert redirect location equals exact value |
+
+`--assert-status` accepts more than one code. A class matches its hundred, a
+range matches its span inclusively, and a comma-separated list matches any
+entry — and they mix:
+
+```bash
+http-assert --assert-status 2xx      https://example.com   # any 200-299
+http-assert --assert-status 200,204  https://example.com   # either
+http-assert --assert-status 401-403  https://example.com   # any of the three
+http-assert --assert-status 301,2xx  https://example.com   # mixed
+```
+
+A code no response can carry — `-1`, `1000`, `099` — is rejected before the
+request is made, exiting `71`. A typo in the invocation is not a fact about the
+service, so it must not arrive as `93`.
 
 The three header flags and `--assert-jq` can be repeated to make several assertions of that kind. Every other assertion flag takes a single value; giving one twice exits `71` rather than silently keeping the last.
 
