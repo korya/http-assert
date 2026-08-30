@@ -33,3 +33,10 @@ func ExampleClient_Do() {
 	// <nil>
 	// true
 }
+
+func ExampleMust() {
+	assertion := ha.Must(ha.AssertJQ(`.status == "healthy"`))
+	fmt.Println(assertion.Kind())
+
+	// Output: jq
+}
