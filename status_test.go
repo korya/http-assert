@@ -1,4 +1,4 @@
-package main
+package httpassert
 
 import (
 	"strings"
@@ -73,6 +73,8 @@ func Test_parseStatusSpec(t *testing.T) {
 			{"000", "no response can carry status"},
 			{"0xx", "not a status class"},
 			{"403-401", "counts down"},
+			{"abc-401", "not a three-digit status code"},
+			{"401-abc", "not a three-digit status code"},
 			{"200,,204", "empty entry"},
 			{"200,", "empty entry"},
 			{"200-", "not a three-digit status code"},
@@ -91,6 +93,13 @@ func Test_parseStatusSpec(t *testing.T) {
 					t.Errorf("error = %q, want it to mention %q", err, tc.Want)
 				}
 			})
+		}
+	})
+
+	t.Run("public constructor rejects an invalid spec", func(t *testing.T) {
+		assertion, err := AssertStatus("not-a-status")
+		if assertion != nil || err == nil {
+			t.Errorf("AssertStatus = (%v, %v), want (nil, error)", assertion, err)
 		}
 	})
 }

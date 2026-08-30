@@ -1,8 +1,7 @@
-package main
+package httpassert
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -26,31 +25,42 @@ type Assertion interface {
 	Kind() string
 
 	// Check reports (nil, nil) when the assertion holds.
-	Check(res *httpResponse) (*Failure, error)
+	Check(res *Response) (*Failure, error)
 }
 
-// Failure describes an assertion that did not hold, in parts as well as prose.
-//
-// Message is the human sentence, unchanged from when assertions returned a bare
-// error, and is what the failure dump prints. The parts around it exist because
-// prose cannot be serialized into anything a dashboard can query; they are not
-// a second source of truth for the message, and no formatter derives one from
-// the other. Reconstructing sentences like "expected to be non-empty, got
-// nothing" from Expected and Actual alone would drift the moment a wording
-// changed, and the drift would surface as a failing end-to-end test rather than
-// as a compile error.
+// FailureCode identifies why an assertion did not hold without prescribing how
+// a caller presents that fact.
+type FailureCode string
+
+const (
+	FailureStatusOK               FailureCode = "status_ok"
+	FailureStatusNOK              FailureCode = "status_nok"
+	FailureStatus                 FailureCode = "status"
+	FailureHeaderPresent          FailureCode = "header_present"
+	FailureHeaderMissing          FailureCode = "header_missing"
+	FailureHeaderEqual            FailureCode = "header_equal"
+	FailureHeaderMatch            FailureCode = "header_match"
+	FailureBodyEmpty              FailureCode = "body_empty"
+	FailureBodyNotEmpty           FailureCode = "body_not_empty"
+	FailureBodyEqual              FailureCode = "body_equal"
+	FailureBodyMatch              FailureCode = "body_match"
+	FailureJQValue                FailureCode = "jq_value"
+	FailureJQNoOutput             FailureCode = "jq_no_output"
+	FailureRedirectStatus         FailureCode = "redirect_status"
+	FailureRedirectLocationAbsent FailureCode = "redirect_location_absent"
+	FailureRedirectEqual          FailureCode = "redirect_equal"
+	FailureRedirectMatch          FailureCode = "redirect_match"
+)
+
+// Failure describes an assertion that was evaluated and did not hold. It is
+// deliberately data only: applications decide how (or whether) to format it.
 type Failure struct {
-	Kind     string // filled in by Check; never set by a constructor
+	Kind     string // assertion family; Client and built-in assertions populate it
+	Code     FailureCode
 	Target   string // header name, jq query, or "" when the kind needs no subject
 	Expected any
 	Actual   any
-	Message  string
 }
-
-// Error lets a Failure travel the same path as an evaluation error, so the
-// caller can collect both into one list and print them in the order the
-// assertions were given.
-func (f *Failure) Error() string { return f.Message }
 
 // assertionFunc adapts a closure to the Assertion interface.
 //
@@ -60,14 +70,14 @@ func (f *Failure) Error() string { return f.Message }
 // have said the same thing at ten times the length.
 type assertionFunc struct {
 	kind  string
-	check func(res *httpResponse) (*Failure, error)
+	check func(res *Response) (*Failure, error)
 }
 
 func (a assertionFunc) Kind() string { return a.kind }
 
 // Check stamps the failure with the assertion's kind, so Kind() and
 // Failure.Kind cannot disagree and no constructor has to repeat itself.
-func (a assertionFunc) Check(res *httpResponse) (*Failure, error) {
+func (a assertionFunc) Check(res *Response) (*Failure, error) {
 	f, err := a.check(res)
 	if f != nil {
 		f.Kind = a.kind
@@ -76,29 +86,13 @@ func (a assertionFunc) Check(res *httpResponse) (*Failure, error) {
 	return f, err
 }
 
-func newAssertion(kind string, check func(res *httpResponse) (*Failure, error)) Assertion {
+func newAssertion(kind string, check func(res *Response) (*Failure, error)) Assertion {
 	return assertionFunc{kind: kind, check: check}
 }
 
 // Pattern-based assertions are built from user input and so can fail before any
 // response exists. They return an error rather than panicking; every other
 // constructor in this file is infallible and returns an Assertion directly.
-
-// headerValues renders a header's values the way the response carried them.
-//
-// A header can appear more than once, so the values are a list -- but %q on a
-// []string prints Go's own syntax, and `got ["abc123"]` told a user reading a
-// failure about a single-valued header that something bracketed had happened
-// to their value (#97). One value now reads as one value, and several read as
-// a list a person would write.
-func headerValues(vs []string) string {
-	quoted := make([]string, len(vs))
-	for i, v := range vs {
-		quoted[i] = strconv.Quote(v)
-	}
-
-	return strings.Join(quoted, ", ")
-}
 
 // Status codes a response can actually carry. net/http refuses to write
 // anything outside this range -- 99 and 1000 panic in WriteHeader -- so a spec
@@ -222,14 +216,14 @@ func parseStatusCode(text string) (int, error) {
 	return code, nil
 }
 
+// AssertStatusOK accepts any success or redirect status (2xx or 3xx).
 func AssertStatusOK() Assertion {
-	return newAssertion("ok", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("ok", func(res *Response) (*Failure, error) {
 		if s := res.StatusCode; s < 200 || s >= 400 {
 			return &Failure{
+				Code:     FailureStatusOK,
 				Expected: "2xx-3xx",
 				Actual:   res.StatusCode,
-				Message: fmt.Sprintf("ok: expected OK, got %d (%q)",
-					res.StatusCode, res.Status),
 			}, nil
 		}
 
@@ -237,14 +231,14 @@ func AssertStatusOK() Assertion {
 	})
 }
 
+// AssertStatusNOK accepts any status outside the 2xx and 3xx ranges.
 func AssertStatusNOK() Assertion {
-	return newAssertion("nok", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("nok", func(res *Response) (*Failure, error) {
 		if s := res.StatusCode; s >= 200 && s < 400 {
 			return &Failure{
+				Code:     FailureStatusNOK,
 				Expected: "not 2xx-3xx",
 				Actual:   res.StatusCode,
-				Message: fmt.Sprintf("nok: expected NOK, got %d (%q)",
-					res.StatusCode, res.Status),
 			}, nil
 		}
 
@@ -252,15 +246,25 @@ func AssertStatusNOK() Assertion {
 	})
 }
 
-// AssertStatus holds when the response carries any status the spec names.
-func AssertStatus(spec statusSpec) Assertion {
-	return newAssertion("status", func(res *httpResponse) (*Failure, error) {
+// AssertStatus builds an assertion accepting any status named by text. Text may
+// be a code, a class such as "2xx", an inclusive range, or a comma-separated
+// list mixing those forms.
+func AssertStatus(text string) (Assertion, error) {
+	spec, err := parseStatusSpec(text)
+	if err != nil {
+		return nil, err
+	}
+
+	return assertStatus(spec), nil
+}
+
+func assertStatus(spec statusSpec) Assertion {
+	return newAssertion("status", func(res *Response) (*Failure, error) {
 		if !spec.matches(res.StatusCode) {
 			return &Failure{
+				Code:     FailureStatus,
 				Expected: spec.text,
 				Actual:   res.StatusCode,
-				Message: fmt.Sprintf("status: expected %s, got %d (%q)",
-					spec.text, res.StatusCode, res.Status),
 			}, nil
 		}
 
@@ -268,14 +272,14 @@ func AssertStatus(spec statusSpec) Assertion {
 	})
 }
 
+// AssertHeaderPresent requires at least one value for name.
 func AssertHeaderPresent(name string) Assertion {
-	return newAssertion("header", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("header", func(res *Response) (*Failure, error) {
 		if res.Header.Values(name) == nil {
 			return &Failure{
+				Code:     FailureHeaderPresent,
 				Target:   name,
 				Expected: "present",
-				Message: fmt.Sprintf("header[%s]: expected to be present, missing",
-					name),
 			}, nil
 		}
 
@@ -283,15 +287,15 @@ func AssertHeaderPresent(name string) Assertion {
 	})
 }
 
+// AssertHeaderMissing requires name to be absent.
 func AssertHeaderMissing(name string) Assertion {
-	return newAssertion("header", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("header", func(res *Response) (*Failure, error) {
 		if vs := res.Header.Values(name); vs != nil {
 			return &Failure{
+				Code:     FailureHeaderMissing,
 				Target:   name,
 				Expected: "missing",
 				Actual:   vs,
-				Message: fmt.Sprintf("header[%s]: expected to be missing, got %s",
-					name, headerValues(vs)),
 			}, nil
 		}
 
@@ -299,15 +303,16 @@ func AssertHeaderMissing(name string) Assertion {
 	})
 }
 
+// AssertHeaderEqual accepts the response when any value of name equals
+// expValue.
 func AssertHeaderEqual(name, expValue string) Assertion {
-	return newAssertion("header", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("header", func(res *Response) (*Failure, error) {
 		vs := res.Header.Values(name)
 		if vs == nil {
 			return &Failure{
+				Code:     FailureHeaderEqual,
 				Target:   name,
 				Expected: expValue,
-				Message: fmt.Sprintf("header[%s]: expected %q, missing",
-					name, expValue),
 			}, nil
 		}
 
@@ -318,29 +323,29 @@ func AssertHeaderEqual(name, expValue string) Assertion {
 		}
 
 		return &Failure{
+			Code:     FailureHeaderEqual,
 			Target:   name,
 			Expected: expValue,
 			Actual:   vs,
-			Message: fmt.Sprintf("header[%s]: expected %q, got %s",
-				name, expValue, headerValues(vs)),
 		}, nil
 	})
 }
 
+// AssertHeaderMatch accepts the response when any value of name matches the Go
+// regular expression expPattern.
 func AssertHeaderMatch(name, expPattern string) (Assertion, error) {
 	re, err := regexp.Compile(expPattern)
 	if err != nil {
 		return nil, err
 	}
 
-	return newAssertion("header", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("header", func(res *Response) (*Failure, error) {
 		vs := res.Header.Values(name)
 		if vs == nil {
 			return &Failure{
+				Code:     FailureHeaderMatch,
 				Target:   name,
 				Expected: expPattern,
-				Message: fmt.Sprintf("header[%s]: expected to match %q, missing",
-					name, expPattern),
 			}, nil
 		}
 
@@ -351,11 +356,10 @@ func AssertHeaderMatch(name, expPattern string) (Assertion, error) {
 		}
 
 		return &Failure{
+			Code:     FailureHeaderMatch,
 			Target:   name,
 			Expected: expPattern,
 			Actual:   vs,
-			Message: fmt.Sprintf("header[%s]: expected to match %q, got %s",
-				name, expPattern, headerValues(vs)),
 		}, nil
 	}), nil
 }
@@ -367,17 +371,22 @@ func AssertHeaderMatch(name, expPattern string) (Assertion, error) {
 // compressed produced a false failure with an unexplained hex dump -- and, with
 // a loose enough pattern, a false pass, which is the one outcome this program
 // exists to refuse (#27).
-func bodyOf(res *httpResponse) ([]byte, error) {
+func bodyOf(res *Response) ([]byte, error) {
 	if res.DecodeErr != nil {
-		return nil, fmt.Errorf("body: response is %s-encoded and was not decoded: %s",
-			res.Encoding, res.DecodeErr)
+		return nil, &EvaluationError{
+			Code:     EvaluationBodyDecode,
+			Kind:     "body",
+			Encoding: res.Encoding,
+			Cause:    res.DecodeErr,
+		}
 	}
 
 	return res.BodyBytes, nil
 }
 
+// AssertBodyEmpty requires the decoded response body to contain zero bytes.
 func AssertBodyEmpty() Assertion {
-	return newAssertion("body", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("body", func(res *Response) (*Failure, error) {
 		body, err := bodyOf(res)
 		if err != nil {
 			return nil, err
@@ -385,10 +394,9 @@ func AssertBodyEmpty() Assertion {
 
 		if len(body) > 0 {
 			return &Failure{
+				Code:     FailureBodyEmpty,
 				Expected: "empty",
 				Actual:   string(body),
-				Message: fmt.Sprintf("body: expected to be empty, got %q",
-					string(body)),
 			}, nil
 		}
 
@@ -432,14 +440,14 @@ func AssertJQ(query string) (Assertion, error) {
 		return nil, err
 	}
 
-	return newAssertion("jq", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("jq", func(res *Response) (*Failure, error) {
 		return runJQ(code, query, res, jqTimeout)
 	}), nil
 }
 
 // runJQ evaluates one compiled query. The deadline is a parameter so the test
 // for it need not wait out the real one; every caller passes jqTimeout.
-func runJQ(code *gojq.Code, query string, res *httpResponse, timeout time.Duration) (*Failure, error) {
+func runJQ(code *gojq.Code, query string, res *Response, timeout time.Duration) (*Failure, error) {
 	doc, err := res.decodeJSON()
 	if err != nil {
 		return nil, err
@@ -466,16 +474,20 @@ func runJQ(code *gojq.Code, query string, res *httpResponse, timeout time.Durati
 		// query never reached a verdict, so there is nothing for Expected
 		// and Actual to describe.
 		if e, isErr := v.(error); isErr {
-			return nil, fmt.Errorf("jq[%s]: %s", query, e)
+			return nil, &EvaluationError{
+				Code:   EvaluationJQ,
+				Kind:   "jq",
+				Target: query,
+				Cause:  e,
+			}
 		}
 
 		if b, isBool := v.(bool); !isBool || !b {
 			return &Failure{
+				Code:     FailureJQValue,
 				Target:   query,
 				Expected: true,
 				Actual:   v,
-				Message: fmt.Sprintf("jq[%s]: expected true, got %s",
-					query, jqValue(v)),
 			}, nil
 		}
 	}
@@ -486,28 +498,19 @@ func runJQ(code *gojq.Code, query string, res *httpResponse, timeout time.Durati
 	// yields no output at all when no user has that id.
 	if outputs == 0 {
 		return &Failure{
+			Code:     FailureJQNoOutput,
 			Target:   query,
 			Expected: true,
-			Message:  fmt.Sprintf("jq[%s]: expected true, got no output", query),
 		}, nil
 	}
 
 	return nil, nil
 }
 
-// jqValue renders a query's output for the failure message. jq's own notation
-// is JSON, so this is what `jq` would have printed for the same expression.
-func jqValue(v any) string {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Sprintf("%v", v)
-	}
-
-	return string(b)
-}
-
+// AssertBodyNotEmpty requires the decoded response body to contain at least
+// one byte.
 func AssertBodyNotEmpty() Assertion {
-	return newAssertion("body", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("body", func(res *Response) (*Failure, error) {
 		body, err := bodyOf(res)
 		if err != nil {
 			return nil, err
@@ -515,8 +518,8 @@ func AssertBodyNotEmpty() Assertion {
 
 		if len(body) == 0 {
 			return &Failure{
+				Code:     FailureBodyNotEmpty,
 				Expected: "non-empty",
-				Message:  "body: expected to be non-empty, got nothing",
 			}, nil
 		}
 
@@ -524,8 +527,9 @@ func AssertBodyNotEmpty() Assertion {
 	})
 }
 
+// AssertBodyEqual requires the decoded response body to equal expContent.
 func AssertBodyEqual(expContent string) Assertion {
-	return newAssertion("body", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("body", func(res *Response) (*Failure, error) {
 		body, err := bodyOf(res)
 		if err != nil {
 			return nil, err
@@ -538,16 +542,15 @@ func AssertBodyEqual(expContent string) Assertion {
 			// made --assert-body-eq '' impossible to satisfy (#22).
 			if len(body) == 0 {
 				return &Failure{
+					Code:     FailureBodyEqual,
 					Expected: expContent,
-					Message: fmt.Sprintf("body: expected %q, missing",
-						expContent),
 				}, nil
 			}
 
 			return &Failure{
+				Code:     FailureBodyEqual,
 				Expected: expContent,
 				Actual:   c,
-				Message:  fmt.Sprintf("body: expected %q, got %q", expContent, c),
 			}, nil
 		}
 
@@ -555,13 +558,15 @@ func AssertBodyEqual(expContent string) Assertion {
 	})
 }
 
+// AssertBodyMatch requires the decoded response body to match the Go regular
+// expression expPattern.
 func AssertBodyMatch(expPattern string) (Assertion, error) {
 	re, err := regexp.Compile(expPattern)
 	if err != nil {
 		return nil, err
 	}
 
-	return newAssertion("body", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("body", func(res *Response) (*Failure, error) {
 		body, err := bodyOf(res)
 		if err != nil {
 			return nil, err
@@ -573,17 +578,15 @@ func AssertBodyMatch(expPattern string) (Assertion, error) {
 			// while emptiness was checked before the pattern was.
 			if len(body) == 0 {
 				return &Failure{
+					Code:     FailureBodyMatch,
 					Expected: expPattern,
-					Message: fmt.Sprintf("body: expected to match %q, missing",
-						expPattern),
 				}, nil
 			}
 
 			return &Failure{
+				Code:     FailureBodyMatch,
 				Expected: expPattern,
 				Actual:   c,
-				Message: fmt.Sprintf("body: expected to match %q, got %q",
-					expPattern, c),
 			}, nil
 		}
 
@@ -594,40 +597,41 @@ func AssertBodyMatch(expPattern string) (Assertion, error) {
 // redirectPrecondition reports the two ways a redirect assertion fails before
 // its Location is compared at all. Both redirect assertions share them, and
 // sharing the code is what keeps their wording identical.
-func redirectPrecondition(res *httpResponse, expected any) *Failure {
+func redirectPrecondition(res *Response, expected any) *Failure {
 	if s := res.StatusCode; s < 300 || s >= 400 {
 		return &Failure{
+			Code:     FailureRedirectStatus,
 			Expected: "3xx",
 			Actual:   res.StatusCode,
-			Message: fmt.Sprintf("redirect: wrong HTTP status: got %d (%q)",
-				res.StatusCode, res.Status),
 		}
 	}
 
 	if vs := res.Header.Values("Location"); vs == nil {
 		return &Failure{
+			Code:     FailureRedirectLocationAbsent,
 			Target:   "Location",
 			Expected: expected,
-			Message:  "redirect: no Location header",
 		}
 	}
 
 	return nil
 }
 
+// AssertRedirectEqual requires a 3xx response whose Location equals
+// expLocation. Configure the HTTP client not to follow redirects when using
+// this assertion.
 func AssertRedirectEqual(expLocation string) Assertion {
-	return newAssertion("redirect", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("redirect", func(res *Response) (*Failure, error) {
 		if f := redirectPrecondition(res, expLocation); f != nil {
 			return f, nil
 		}
 
 		if l := res.Header.Get("Location"); l != expLocation {
 			return &Failure{
+				Code:     FailureRedirectEqual,
 				Target:   "Location",
 				Expected: expLocation,
 				Actual:   l,
-				Message: fmt.Sprintf("redirect: wrong Location: expected %q, got %q",
-					expLocation, l),
 			}, nil
 		}
 
@@ -635,24 +639,26 @@ func AssertRedirectEqual(expLocation string) Assertion {
 	})
 }
 
+// AssertRedirectMatch requires a 3xx response whose Location matches the Go
+// regular expression expPattern. Configure the HTTP client not to follow
+// redirects when using this assertion.
 func AssertRedirectMatch(expPattern string) (Assertion, error) {
 	re, err := regexp.Compile(expPattern)
 	if err != nil {
 		return nil, err
 	}
 
-	return newAssertion("redirect", func(res *httpResponse) (*Failure, error) {
+	return newAssertion("redirect", func(res *Response) (*Failure, error) {
 		if f := redirectPrecondition(res, expPattern); f != nil {
 			return f, nil
 		}
 
 		if l := res.Header.Get("Location"); !re.MatchString(l) {
 			return &Failure{
+				Code:     FailureRedirectMatch,
 				Target:   "Location",
 				Expected: expPattern,
 				Actual:   l,
-				Message: fmt.Sprintf("redirect: wrong Location: expected to match %q, got %q",
-					expPattern, l),
 			}, nil
 		}
 

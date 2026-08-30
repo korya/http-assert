@@ -41,7 +41,8 @@ func Test_buildVersion(t *testing.T) {
 		},
 		Want: "v0.1.0 (commit 4ffe282, built " + when + ", go1.25.5, " + platform + ")",
 	}, {
-		// `go install github.com/korya/http-assert@v0.0.7`. The module version
+		// `go install github.com/korya/http-assert/cmd/http-assert@v0.0.7`.
+		// The module version
 		// is authoritative and there is no VCS information to report.
 		Name: "module install",
 		Info: &debug.BuildInfo{

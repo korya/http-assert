@@ -2,6 +2,7 @@ version: 2
 
 builds:
   - id: http-assert
+    main: ./cmd/http-assert
     # A tool whose job is to run inside pipelines and scratch images has no
     # business linking against a libc that might not be there.
     env:

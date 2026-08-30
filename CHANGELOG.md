@@ -9,6 +9,22 @@ are marked **Breaking** and listed first in their section.
 
 ## [Unreleased]
 
+### Added
+
+- A reusable Go package at `github.com/korya/http-assert` exposes the HTTP
+  client, structured results and all response assertion constructors. The
+  library invokes its configured HTTP client once and leaves retries, logging
+  and presentation to its caller.
+
+### Changed
+
+- **Breaking for source installs:** the CLI now lives at
+  `github.com/korya/http-assert/cmd/http-assert`; use
+  `go install github.com/korya/http-assert/cmd/http-assert@latest`. Published
+  release archives and the `http-assert` binary name are unchanged.
+- Assertion failures and evaluation errors are structured library data. The
+  CLI owns human-readable formatting and preserves its existing output.
+
 ## [0.3.0] - 2026-08-11
 
 ### Added

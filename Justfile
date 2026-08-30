@@ -4,11 +4,11 @@ default:
 
 [doc("Build the binary")]
 build:
-    go build -o http-assert .
+    go build -o http-assert ./cmd/http-assert
 
 [doc("Build for release (optimized)")]
 build-release:
-    go build -ldflags="-s -w" -o http-assert .
+    go build -ldflags="-s -w" -o http-assert ./cmd/http-assert
 
 [doc("Run every platform-independent check: build, tidy, config, vet, lint, security")]
 static-checks: build tidy-check lint-config-check vet lint security
@@ -18,7 +18,7 @@ pre-commit: static-checks test test-race
 
 [doc("Build and check compilation without creating binary")]
 check:
-    go build -o /dev/null .
+    go build ./...
 
 [doc("Fail if go.mod or go.sum is not tidy")]
 tidy-check:
@@ -96,7 +96,7 @@ test:
 
 [doc("Run the end-to-end suite (builds and executes the CLI)")]
 test-e2e:
-    go test ./... -e2e -count=1
+    go test ./cmd/http-assert -e2e -count=1
 
 [doc("Run tests with race detection")]
 test-race:
@@ -112,7 +112,8 @@ test-cover:
     set -euo pipefail
     unit=$(mktemp -d); e2e=$(mktemp -d)
     trap 'rm -rf "$unit" "$e2e"' EXIT
-    E2E_COVERDIR="$e2e" go test ./... -e2e -count=1 -cover -args -test.gocoverdir="$unit"
+    go test ./... -cover -args -test.gocoverdir="$unit"
+    E2E_COVERDIR="$e2e" go test ./cmd/http-assert -e2e -count=1 -cover -args -test.gocoverdir="$unit"
     go tool covdata percent -i="$unit,$e2e"
 
 [doc("Run tests with coverage and generate HTML report")]
@@ -121,7 +122,8 @@ test-coverage:
     set -euo pipefail
     unit=$(mktemp -d); e2e=$(mktemp -d)
     trap 'rm -rf "$unit" "$e2e"' EXIT
-    E2E_COVERDIR="$e2e" go test ./... -e2e -count=1 -cover -args -test.gocoverdir="$unit"
+    go test ./... -cover -args -test.gocoverdir="$unit"
+    E2E_COVERDIR="$e2e" go test ./cmd/http-assert -e2e -count=1 -cover -args -test.gocoverdir="$unit"
     go tool covdata textfmt -i="$unit,$e2e" -o=coverage.out
     go tool cover -html=coverage.out -o coverage.html
     echo "Coverage report: coverage.html"
@@ -132,7 +134,8 @@ test-cover-func:
     set -euo pipefail
     unit=$(mktemp -d); e2e=$(mktemp -d)
     trap 'rm -rf "$unit" "$e2e"' EXIT
-    E2E_COVERDIR="$e2e" go test ./... -e2e -count=1 -cover -args -test.gocoverdir="$unit" >/dev/null
+    go test ./... -cover -args -test.gocoverdir="$unit" >/dev/null
+    E2E_COVERDIR="$e2e" go test ./cmd/http-assert -e2e -count=1 -cover -args -test.gocoverdir="$unit" >/dev/null
     go tool covdata func -i="$unit,$e2e" | sort -k2 -n
 
 [doc("Clean build artifacts")]
@@ -141,7 +144,7 @@ clean:
 
 [doc("Install the binary to $GOPATH/bin")]
 install:
-    go install .
+    go install ./cmd/http-assert
 
 [doc("Format Go code")]
 fmt:

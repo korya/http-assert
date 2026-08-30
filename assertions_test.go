@@ -1,4 +1,4 @@
-package main
+package httpassert
 
 import (
 	"errors"
@@ -39,7 +39,7 @@ func Test_AssertStatusOK(t *testing.T) {
 	nok := AssertStatusNOK()
 	for _, tc := range testCases {
 		t.Run(strconv.Itoa(tc.StatusCode), func(t *testing.T) {
-			res := &httpResponse{
+			res := &Response{
 				Response: &http.Response{
 					StatusCode: tc.StatusCode,
 					Status:     tc.Status,
@@ -58,17 +58,17 @@ func Test_AssertStatusOK(t *testing.T) {
 	}
 }
 
-// mustSpec parses a spec that the test author asserts is valid. Parsing rather
-// than constructing keeps the tests honest about the only path a caller has.
-func mustSpec(t *testing.T, text string) statusSpec {
+// mustStatusAssertion builds an assertion from a spec the test author asserts
+// is valid.
+func mustStatusAssertion(t *testing.T, text string) Assertion {
 	t.Helper()
 
-	spec, err := parseStatusSpec(text)
+	assertion, err := AssertStatus(text)
 	if err != nil {
-		t.Fatalf("parseStatusSpec(%q): unexpected error: %s", text, err)
+		t.Fatalf("AssertStatus(%q): unexpected error: %s", text, err)
 	}
 
-	return spec
+	return assertion
 }
 
 func Test_AssertStatus(t *testing.T) {
@@ -99,13 +99,13 @@ func Test_AssertStatus(t *testing.T) {
 	// be 1, which is no longer expressible: a spec naming a code no response
 	// can carry is now rejected at the flag rather than failing at runtime.
 	assertions := map[int]Assertion{
-		599: AssertStatus(mustSpec(t, "599")),
-		200: AssertStatus(mustSpec(t, "200")),
-		429: AssertStatus(mustSpec(t, "429")),
+		599: mustStatusAssertion(t, "599"),
+		200: mustStatusAssertion(t, "200"),
+		429: mustStatusAssertion(t, "429"),
 	}
 	for _, tc := range testCases {
 		t.Run(strconv.Itoa(tc.StatusCode), func(t *testing.T) {
-			res := &httpResponse{
+			res := &Response{
 				Response: &http.Response{
 					StatusCode: tc.StatusCode,
 					Status:     tc.Status,
@@ -225,7 +225,7 @@ func Test_AssertHeader(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.CaseName, func(t *testing.T) {
-			res := &httpResponse{
+			res := &Response{
 				Response: &http.Response{
 					Header: http.Header(tc.Header),
 				},
@@ -296,7 +296,7 @@ func Test_AssertBody(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.CaseName, func(t *testing.T) {
-			res := &httpResponse{BodyBytes: tc.Body}
+			res := &Response{BodyBytes: tc.Body}
 
 			checkErr(t, "empty", check(empty, res), tc.ExpEmptyError)
 			checkErr(t, "equal", check(equal, res), tc.ExpEqualError)
@@ -317,11 +317,11 @@ func Test_AssertBody_emptyIsAssertable(t *testing.T) {
 	patterns := []string{"^$", ".*", `\A\z`, ""}
 
 	t.Run("equal to the empty string", func(t *testing.T) {
-		res := &httpResponse{BodyBytes: []byte{}}
+		res := &Response{BodyBytes: []byte{}}
 		checkErr(t, "equal", check(AssertBodyEqual(""), res), "")
 
 		// And a nil body, which is what a 204 produces.
-		checkErr(t, "equal, nil body", check(AssertBodyEqual(""), &httpResponse{}), "")
+		checkErr(t, "equal, nil body", check(AssertBodyEqual(""), &Response{}), "")
 	})
 
 	for _, p := range patterns {
@@ -331,15 +331,15 @@ func Test_AssertBody_emptyIsAssertable(t *testing.T) {
 				t.Fatalf("cannot build the assertion: %s", err)
 			}
 
-			checkErr(t, "match", check(a, &httpResponse{BodyBytes: []byte{}}), "")
-			checkErr(t, "match, nil body", check(a, &httpResponse{}), "")
+			checkErr(t, "match", check(a, &Response{BodyBytes: []byte{}}), "")
+			checkErr(t, "match, nil body", check(a, &Response{}), "")
 		})
 	}
 
 	// The verdict moved; the wording did not. A body that is empty when
 	// something was expected still reads as "missing" rather than `got ""`.
 	t.Run("an empty body still reports as missing", func(t *testing.T) {
-		res := &httpResponse{BodyBytes: []byte{}}
+		res := &Response{BodyBytes: []byte{}}
 		checkErr(t, "equal", check(AssertBodyEqual("value"), res), `body: expected "value", missing`)
 
 		a, err := AssertBodyMatch("^value$")
@@ -351,7 +351,7 @@ func Test_AssertBody_emptyIsAssertable(t *testing.T) {
 
 	// The inverse must keep failing: a non-empty body is not the empty string.
 	t.Run("a non-empty body does not equal the empty string", func(t *testing.T) {
-		res := &httpResponse{BodyBytes: []byte("x")}
+		res := &Response{BodyBytes: []byte("x")}
 		checkErr(t, "equal", check(AssertBodyEqual(""), res), `body: expected "", got "x"`)
 	})
 }
@@ -514,7 +514,7 @@ func Test_AssertRedirect(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.CaseName, func(t *testing.T) {
-			res := &httpResponse{
+			res := &Response{
 				Response: &http.Response{
 					StatusCode: tc.StatusCode,
 					Status:     strings.Join(strings.Split(strconv.Itoa(tc.StatusCode), ""), "_"),
@@ -561,7 +561,7 @@ func Test_AssertBodyNotEmpty(t *testing.T) {
 	a := AssertBodyNotEmpty()
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			checkErr(t, "not-empty", check(a, &httpResponse{BodyBytes: tc.Body}), tc.Want)
+			checkErr(t, "not-empty", check(a, &Response{BodyBytes: tc.Body}), tc.Want)
 		})
 	}
 
@@ -570,7 +570,7 @@ func Test_AssertBodyNotEmpty(t *testing.T) {
 	t.Run("it is the exact inverse of AssertBodyEmpty", func(t *testing.T) {
 		empty := AssertBodyEmpty()
 		for _, body := range [][]byte{nil, {}, []byte(" "), []byte("x"), []byte("longer body")} {
-			res := &httpResponse{BodyBytes: body}
+			res := &Response{BodyBytes: body}
 			if (check(empty, res) == nil) == (check(a, res) == nil) {
 				t.Errorf("both agree on %q; they must disagree", string(body))
 			}
@@ -628,13 +628,13 @@ func Test_AssertMatchConstructorsRejectBadPatterns(t *testing.T) {
 func Test_AssertionIdentity(t *testing.T) {
 	t.Parallel()
 
-	statusRes := func(code int, status string) *httpResponse {
-		return &httpResponse{
+	statusRes := func(code int, status string) *Response {
+		return &Response{
 			Response: &http.Response{StatusCode: code, Status: status},
 		}
 	}
-	headerRes := func(h http.Header) *httpResponse {
-		return &httpResponse{
+	headerRes := func(h http.Header) *Response {
+		return &Response{
 			Response: &http.Response{StatusCode: 200, Status: "200 OK", Header: h},
 		}
 	}
@@ -647,7 +647,7 @@ func Test_AssertionIdentity(t *testing.T) {
 	tests := []struct {
 		Name      string
 		Assertion Assertion
-		Res       *httpResponse
+		Res       *Response
 		Kind      string
 		Target    string
 		Expected  any
@@ -664,7 +664,7 @@ func Test_AssertionIdentity(t *testing.T) {
 			Kind: "nok", Expected: "not 2xx-3xx", Actual: 200,
 		},
 		{
-			Name: "status", Assertion: AssertStatus(mustSpec(t, "200")),
+			Name: "status", Assertion: mustStatusAssertion(t, "200"),
 			Res:  statusRes(500, "500 Internal Server Error"),
 			Kind: "status", Expected: "200", Actual: 500,
 		},
@@ -680,7 +680,7 @@ func Test_AssertionIdentity(t *testing.T) {
 		},
 		{
 			Name: "body equal", Assertion: AssertBodyEqual("want"),
-			Res:  &httpResponse{BodyBytes: []byte("got")},
+			Res:  &Response{BodyBytes: []byte("got")},
 			Kind: "body", Expected: "want", Actual: "got",
 		},
 		{
@@ -724,8 +724,8 @@ func Test_AssertionIdentity(t *testing.T) {
 			if !reflect.DeepEqual(f.Actual, tc.Actual) {
 				t.Errorf("Actual = %#v, want %#v", f.Actual, tc.Actual)
 			}
-			if f.Message == "" {
-				t.Error("Message is empty; the human path reads this")
+			if f.Code == "" {
+				t.Error("Code is empty; structured consumers cannot classify the failure")
 			}
 		})
 	}
@@ -740,14 +740,14 @@ func Test_AssertionCheckSeparatesFailureFromError(t *testing.T) {
 	t.Parallel()
 
 	t.Run("an assertion that holds reports neither", func(t *testing.T) {
-		f, err := AssertBodyEqual("same").Check(&httpResponse{BodyBytes: []byte("same")})
+		f, err := AssertBodyEqual("same").Check(&Response{BodyBytes: []byte("same")})
 		if f != nil || err != nil {
 			t.Errorf("got (%v, %v), want (nil, nil)", f, err)
 		}
 	})
 
 	t.Run("an undecodable body is an error, not a Failure", func(t *testing.T) {
-		res := &httpResponse{
+		res := &Response{
 			Encoding:  "compress",
 			DecodeErr: errors.New(`no decoder for "compress"`),
 		}
@@ -764,15 +764,19 @@ func Test_AssertionCheckSeparatesFailureFromError(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected an evaluation error, got nil")
 				}
-				if !strings.Contains(err.Error(), "was not decoded") {
-					t.Errorf("error = %q, want it to name the encoding problem", err)
+				var evaluation *EvaluationError
+				if !errors.As(err, &evaluation) {
+					t.Fatalf("error = %T, want *EvaluationError", err)
+				}
+				if evaluation.Code != EvaluationBodyDecode || evaluation.Encoding != "compress" {
+					t.Errorf("evaluation = %+v, want body-decode error for compress", evaluation)
 				}
 			})
 		}
 	})
 
 	t.Run("a status assertion is unaffected by an undecodable body", func(t *testing.T) {
-		res := &httpResponse{
+		res := &Response{
 			Response:  &http.Response{StatusCode: 200, Status: "200 OK"},
 			Encoding:  "compress",
 			DecodeErr: errors.New(`no decoder for "compress"`),
