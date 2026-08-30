@@ -158,12 +158,12 @@ func TestClientDoPerformsOneRequestAndChecksEveryAssertionInOrder(t *testing.T) 
 	}
 }
 
-func TestClientDoUsesDefaultClient(t *testing.T) {
-	original := http.DefaultClient
-	t.Cleanup(func() { http.DefaultClient = original })
+func TestClientDoUsesPackageDefaultClient(t *testing.T) {
+	original := defaultHTTPClient
+	t.Cleanup(func() { defaultHTTPClient = original })
 
 	called := false
-	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	defaultHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		called = true
 		return &http.Response{
 			StatusCode: 204,
@@ -180,6 +180,15 @@ func TestClientDoUsesDefaultClient(t *testing.T) {
 	}
 	if !called || !result.Passed() {
 		t.Errorf("called = %v, result = %+v", called, result)
+	}
+}
+
+func TestDefaultHTTPClientBoundsTheWholeRequest(t *testing.T) {
+	if got := defaultHTTPClient.Timeout; got != defaultRequestTimeout {
+		t.Errorf("default timeout = %s, want %s", got, defaultRequestTimeout)
+	}
+	if defaultHTTPClient.Timeout <= 0 {
+		t.Error("default client has no total request timeout")
 	}
 }
 

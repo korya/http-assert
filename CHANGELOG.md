@@ -24,6 +24,9 @@ are marked **Breaking** and listed first in their section.
   release archives and the `http-assert` binary name are unchanged.
 - Assertion failures and evaluation errors are structured library data. The
   CLI owns human-readable formatting and preserves its existing output.
+- The library's zero-value client uses a 20-second total request timeout instead
+  of the unbounded `http.DefaultClient`. Callers can still inject an HTTP client
+  or apply a shorter request-context deadline.
 
 ## [0.3.0] - 2026-08-11
 
