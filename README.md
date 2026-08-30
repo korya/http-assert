@@ -79,7 +79,7 @@ different answer, the deviation is deliberate, and
 - [Recipes](#recipes)
 - [Reference](#reference): [environment variables](#environment-variables),
   [exit codes](#exit-codes), [coming from curl](#coming-from-curl)
-- [License](#license) · [Development](#development)
+- [License](#license) · [Development](#development) · [Changelog](CHANGELOG.md)
 
 ## Installation
 
