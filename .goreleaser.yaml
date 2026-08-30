@@ -33,10 +33,20 @@ archives:
         formats: [zip]
     files:
       - README.md
+      - CHANGELOG.md
       - LICENSE
 
 checksum:
   name_template: checksums.txt
 
+# The release body is CHANGELOG.md and nothing else. The release workflow passes
+# the section for the tag as --release-notes, which makes this pipe unreachable:
+# goreleaser loads the file and returns before generating anything.
+#
+# It stays, and stays enabled, because `disable: true` would throw the file away
+# too and publish empty notes -- the flag is ignored when the pipe is disabled.
+# What is left is the fallback for a `goreleaser release` run by hand without the
+# flag, which produces the commit dump the changelog exists to replace. Use
+# `just release-notes` instead.
 changelog:
   use: github
