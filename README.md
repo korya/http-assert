@@ -147,9 +147,15 @@ func Check(url string) (*ha.Result, error) {
 		req,
 		ha.AssertStatusOK(),
 		ha.AssertHeaderEqual("Content-Type", "application/json"),
+		ha.Must(ha.AssertJQ(`.status == "healthy"`)),
 	)
 }
 ```
+
+Constructors that parse a status expression, regular expression or jq query
+return `(ha.Assertion, error)`. `ha.Must(...)` keeps static, programmer-owned
+expressions inline; it panics on invalid input, so runtime values should handle
+the constructor error normally.
 
 `Client.Do` calls the configured HTTP client once and never retries. A returned
 error means no complete response was available, such as a transport or
