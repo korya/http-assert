@@ -6,7 +6,15 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"time"
 )
+
+const defaultRequestTimeout = 20 * time.Second
+
+// defaultHTTPClient is shared so its underlying DefaultTransport can reuse
+// connections. Its total timeout covers connection setup, redirects, and
+// reading the response body; callers needing another policy supply HTTPClient.
+var defaultHTTPClient = &http.Client{Timeout: defaultRequestTimeout}
 
 var (
 	// ErrNoAssertions is returned before a request is sent when Do has nothing
@@ -92,8 +100,9 @@ func (r *Result) Passed() bool {
 // It never retries; retry policy, logging, and presentation belong to the
 // caller. The configured HTTP client's redirect policy still applies.
 //
-// The zero value uses http.DefaultClient. Set HTTPClient when the caller needs
-// custom transports, redirect behavior, TLS settings, or timeouts.
+// The zero value uses a shared client with a 20-second total request timeout.
+// Set HTTPClient when the caller needs custom transports, redirect behavior,
+// TLS settings, or timeouts.
 type Client struct {
 	HTTPClient *http.Client
 }
@@ -118,7 +127,7 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) (*Result, error) 
 
 	client := c.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultHTTPClient
 	}
 
 	// The caller supplies both the request and (optionally) the HTTP client;

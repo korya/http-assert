@@ -160,10 +160,11 @@ preformatted text, so the calling application controls presentation. Evaluation
 errors such as invalid JSON remain distinct from responses that were evaluated
 and failed.
 
-The zero-value client uses `http.DefaultClient`. Supply `HTTPClient` to control
-timeouts, transports, TLS and redirects; redirects may involve multiple HTTP
-requests according to that client's policy. Retry policy, logging and CLI
-output intentionally remain outside the library API.
+The zero-value client uses a shared HTTP client with a 20-second total timeout,
+covering connection setup, redirects and response-body reads. Supply
+`HTTPClient` to choose another timeout, transport, TLS or redirect policy; a
+request-context deadline can impose a shorter per-call bound. Retry policy,
+logging and CLI output intentionally remain outside the library API.
 
 ## Usage
 
