@@ -672,3 +672,18 @@ just test-cover   # merged unit + end-to-end coverage
 
 The end-to-end tests are opt-in: `go test ./...` runs the unit tests only, and
 `-e2e` (or the recipes above) switches the full suite on.
+
+### Releasing
+
+[`CHANGELOG.md`](CHANGELOG.md) *is* the release notes. The section for a tag
+becomes the body of its GitHub release, so a tag whose section is missing or
+empty fails the release before anything is published.
+
+```bash
+just release-notes v0.4.0   # preview exactly what the release will say
+just release-snapshot       # build every published target, publish nothing
+```
+
+To cut a release: retitle `[Unreleased]` as the new version with today's date,
+add its compare link at the bottom of the file, bump `VERSION` in the download
+snippet above, commit, and push the tag.

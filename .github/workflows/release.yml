@@ -14,8 +14,8 @@ jobs:
     steps:
     - uses: actions/checkout@v7
       with:
-        # goreleaser builds the changelog from the range between this tag and
-        # the previous one, which a shallow clone does not contain.
+        # goreleaser derives the release version from the tag history, which a
+        # shallow clone does not carry.
         fetch-depth: 0
 
     - name: Set up Go
@@ -32,10 +32,21 @@ jobs:
     - name: Run end-to-end tests
       run: just test-e2e
 
+    # The release body is the tag's section of CHANGELOG.md, nothing else. This
+    # fails when that section is missing or empty, which stops the release
+    # before a single artifact is published -- the recoverable moment to find
+    # out that a tag was cut without its entry.
+    #
+    # Not into dist/: `release --clean` deletes that directory before it reads
+    # anything, so a notes file written there would be gone by the time
+    # goreleaser looked for it.
+    - name: Extract the release notes from CHANGELOG.md
+      run: just release-notes "${{ github.ref_name }}" > "${{ runner.temp }}/release-notes.md"
+
     - name: Publish the release
       uses: goreleaser/goreleaser-action@v7
       with:
         version: '~> v2'
-        args: release --clean
+        args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

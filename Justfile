@@ -163,6 +163,56 @@ release-snapshot:
     # tag, so it is safe to run at any point.
     goreleaser release --snapshot --clean
 
+[doc("Print the CHANGELOG.md section for a version, for use as release notes")]
+release-notes version:
+    #!/usr/bin/env bash
+    # The release notes on GitHub are CHANGELOG.md and nothing else, so this is
+    # what stands between a curated section and goreleaser's commit dump. It
+    # prints to stdout; the caller decides where the file goes -- not dist/,
+    # which `goreleaser release --clean` deletes before it reads anything.
+    #
+    # Failing here is the point. A tag whose section is missing or empty stops
+    # the release before a single artifact is published, which is recoverable;
+    # a published release with empty notes is not.
+    set -euo pipefail
+    v="{{ version }}"; v="${v#v}"
+    section=$(awk -v v="$v" '
+      BEGIN { gsub(/\./, "\\.", v) }
+      $0 ~ "^## \\[" v "\\]" { p = 1; next }
+      p && /^## /            { exit }
+      p && /^\[[^]]+\]: /    { exit }
+      p                      { line[++n] = $0; if (NF) last = n }
+      END { for (i = 1; i <= last; i++) print line[i] }
+    ' CHANGELOG.md | sed -e '/./,$!d')
+    if [ -z "$section" ]; then
+      echo "CHANGELOG.md has no entries under [$v]" >&2
+      exit 1
+    fi
+    printf '%s\n' "$section"
+
+[doc("Warn if a branch changes Go sources without touching CHANGELOG.md")]
+changelog-check base="origin/master":
+    #!/usr/bin/env bash
+    # A changelog that only mentions some of the changes is worse than none,
+    # because it still reads as the source of truth. Nothing else notices when
+    # an entry is forgotten -- the release gate fires far too late, when the
+    # tag is already cut.
+    #
+    # It warns rather than fails, like toolchain-check. Plenty of Go changes
+    # are genuinely invisible to a user, and a red build for a refactor teaches
+    # everyone to click through the one that matters.
+    set -uo pipefail
+    changed=$(git diff --name-only "{{ base }}...HEAD" 2>/dev/null || true)
+    if [ -z "$changed" ]; then
+      echo "no changes against {{ base }}; nothing to check"
+      exit 0
+    fi
+    echo "$changed" | grep -q '\.go$' || exit 0
+    echo "$changed" | grep -qx 'CHANGELOG.md' && exit 0
+    msg="Go sources changed but CHANGELOG.md did not; add an entry under [Unreleased] if this is user-visible"
+    [ -n "${GITHUB_ACTIONS:-}" ] && echo "::warning file=CHANGELOG.md::${msg}"
+    echo "$msg" >&2
+
 [doc("Run every check CI runs, including the end-to-end suite")]
 pre-push: pre-commit test-e2e
 

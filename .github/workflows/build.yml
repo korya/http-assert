@@ -18,6 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
+      with:
+        # The changelog check diffs this branch against the base commit, which
+        # a shallow clone does not reach.
+        fetch-depth: 0
 
     - name: Set up Go
       uses: actions/setup-go@v7
@@ -32,6 +36,15 @@ jobs:
     # because a new Go patch is not a defect in this repository.
     - name: Check the pinned Go toolchain is current
       run: just toolchain-check
+
+    # Only on a pull request, where there is a base to diff against. Warns for
+    # the same reason toolchain-check does: plenty of Go changes are invisible
+    # to a user, and a red build for a refactor with nothing to say would train
+    # everyone to click past the one that matters. The release gate is what
+    # actually enforces the file.
+    - name: Check the changelog was updated
+      if: github.event_name == 'pull_request'
+      run: just changelog-check ${{ github.event.pull_request.base.sha }}
 
     - name: Install golangci-lint
       uses: golangci/golangci-lint-action@v9
