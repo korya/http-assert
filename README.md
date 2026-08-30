@@ -90,7 +90,7 @@ amd64 and arm64 are attached to every [release](https://github.com/korya/http-as
 
 ```bash
 # Pick the latest tag from https://github.com/korya/http-assert/releases
-VERSION=v0.1.0
+VERSION=v0.3.0
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 ARCHIVE="http-assert_${VERSION#v}_${OS}_${ARCH}.tar.gz"
