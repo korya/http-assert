@@ -1,10 +1,13 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+
+	ha "github.com/korya/http-assert"
 )
 
 // cloneForAttempt is the piece of retrying that cannot be observed from the
@@ -91,5 +94,46 @@ func Test_cloneForAttempt_isolatesHeaders(t *testing.T) {
 
 	if got := req.Header.Get("X-Added-By-This-Attempt"); got != "" {
 		t.Errorf("the original gained a header from its clone: %q", got)
+	}
+}
+
+func TestClientDoRejectsNoAssertions(t *testing.T) {
+	t.Parallel()
+
+	req, err := http.NewRequest(http.MethodGet, "http://example.com/", nil)
+	if err != nil {
+		t.Fatalf("cannot build the request: %s", err)
+	}
+
+	err = (Client{}).Do(req)
+	var exit *exitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("Do error = %T, want *exitError", err)
+	}
+	if exit.code != exitBadInvocation || exit.msg != "no assertions defined" {
+		t.Errorf("Do error = %+v", exit)
+	}
+}
+
+func TestDoOnceReportsBodyReplayFailure(t *testing.T) {
+	t.Parallel()
+
+	req, err := http.NewRequest(http.MethodPost, "http://example.com/", strings.NewReader("payload"))
+	if err != nil {
+		t.Fatalf("cannot build the request: %s", err)
+	}
+	want := errors.New("cannot rewind")
+	req.GetBody = func() (io.ReadCloser, error) { return nil, want }
+
+	err = (Client{}).doOnce(&http.Client{}, req, []ha.Assertion{ha.AssertStatusOK()})
+	var exit *exitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("doOnce error = %T, want *exitError", err)
+	}
+	if exit.code != exitTransportFail {
+		t.Errorf("exit code = %d, want %d", exit.code, exitTransportFail)
+	}
+	if !strings.Contains(exit.msg, "failed to rewind the request body:\n- cannot rewind") {
+		t.Errorf("error does not explain the replay failure:\n%s", exit.msg)
 	}
 }

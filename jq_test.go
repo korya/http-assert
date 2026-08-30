@@ -1,4 +1,4 @@
-package main
+package httpassert
 
 import (
 	"errors"
@@ -15,7 +15,7 @@ const jqDoc = `{"status":"success","count":5,"active":true,"nothing":null,
 
 // jqResponse builds a response carrying the document above, or whatever body a
 // case needs.
-func jqResponse(body string) *httpResponse {
+func jqResponse(body string) *Response {
 	r := response("200 OK", http.Header{}, "")
 	r.BodyBytes = []byte(body)
 
@@ -211,7 +211,7 @@ func Test_AssertJQ_boundsARunawayQuery(t *testing.T) {
 				// only cares that it stopped, and why is asserted below.
 				f, err := runJQ(code, query, jqResponse(jqDoc), short)
 				if err == nil && f != nil {
-					err = f
+					err = textError("query returned an assertion failure")
 				}
 				done <- err
 			}()

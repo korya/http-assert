@@ -15,8 +15,7 @@ import (
 // its externally observable contract only: exit code, stdout, stderr.
 //
 // It deliberately avoids reaching into package internals. Every test here must
-// keep passing verbatim across the planned rearchitecture (#54 viper removal,
-// #55 run() extraction, #56 assertion constructors), which is the property that
+// keep passing verbatim across architecture changes, which is the property that
 // makes those refactors safe to perform.
 
 // runE2E gates the whole suite. It is opt-in: `go test ./...` runs the unit

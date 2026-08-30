@@ -89,12 +89,8 @@ package main
 
 import (
 	"bytes"
-	"compress/flate"
-	"compress/gzip"
-	"compress/zlib"
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -107,8 +103,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/zstd"
+	ha "github.com/korya/http-assert"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -879,7 +874,7 @@ func checkRepeats(fs *pflag.FlagSet) {
 // Without this the pattern reached regexp.MustCompile and the process died with
 // a stack trace and exit code 2, which is not part of the documented contract
 // and gave the user no idea which flag was at fault (#17).
-func mustCompileAssertion(flag, pattern string, build func(string) (Assertion, error)) Assertion {
+func mustCompileAssertion(flag, pattern string, build func(string) (ha.Assertion, error)) ha.Assertion {
 	a, err := build(pattern)
 	if err != nil {
 		dief(exitBadInvocation, "Invalid value for %s flag: %s", flag, err)
@@ -901,40 +896,36 @@ func mustCompileAssertion(flag, pattern string, build func(string) (Assertion, e
 // flags drifted apart because nothing connected them; a helper is what connects
 // them, in the same way rejectRepeats derives from the flag's type rather than
 // from a list.
-func boolAssertion(cmd *cobra.Command, name string, whenTrue, whenFalse func() Assertion) []Assertion {
+func boolAssertion(cmd *cobra.Command, name string, whenTrue, whenFalse func() ha.Assertion) []ha.Assertion {
 	if !cmd.Flags().Changed(name) {
 		return nil
 	}
 
 	if v, _ := cmd.Flags().GetBool(name); v {
-		return []Assertion{whenTrue()}
+		return []ha.Assertion{whenTrue()}
 	}
 
-	return []Assertion{whenFalse()}
+	return []ha.Assertion{whenFalse()}
 }
 
-func parseAssertionFlags(cmd *cobra.Command) []Assertion {
-	var res []Assertion
+func parseAssertionFlags(cmd *cobra.Command) []ha.Assertion {
+	var res []ha.Assertion
 
-	res = append(res, boolAssertion(cmd, "assert-ok", AssertStatusOK, AssertStatusNOK)...)
-	res = append(res, boolAssertion(cmd, "assert-body-empty", AssertBodyEmpty, AssertBodyNotEmpty)...)
+	res = append(res, boolAssertion(cmd, "assert-ok", ha.AssertStatusOK, ha.AssertStatusNOK)...)
+	res = append(res, boolAssertion(cmd, "assert-body-empty", ha.AssertBodyEmpty, ha.AssertBodyNotEmpty)...)
 
 	if cmd.Flags().Changed("assert-redirect") {
 		v, _ := cmd.Flags().GetString("assert-redirect")
-		res = append(res, mustCompileAssertion("--assert-redirect", v, AssertRedirectMatch))
+		res = append(res, mustCompileAssertion("--assert-redirect", v, ha.AssertRedirectMatch))
 	}
 	if cmd.Flags().Changed("assert-redirect-eq") {
 		v, _ := cmd.Flags().GetString("assert-redirect-eq")
-		res = append(res, AssertRedirectEqual(v))
+		res = append(res, ha.AssertRedirectEqual(v))
 	}
 
 	if cmd.Flags().Changed("assert-status") {
 		v, _ := cmd.Flags().GetString("assert-status")
-		spec, err := parseStatusSpec(v)
-		if err != nil {
-			dief(exitBadInvocation, "Invalid value for --assert-status flag: %s", err)
-		}
-		res = append(res, AssertStatus(spec))
+		res = append(res, mustCompileAssertion("--assert-status", v, ha.AssertStatus))
 	}
 
 	if cmd.Flags().Changed("assert-header") {
@@ -948,17 +939,17 @@ func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 	if cmd.Flags().Changed("assert-header-missing") {
 		vs, _ := cmd.Flags().GetStringArray("assert-header-missing")
 		for _, v := range vs {
-			res = append(res, AssertHeaderMissing(strings.TrimSpace(v)))
+			res = append(res, ha.AssertHeaderMissing(strings.TrimSpace(v)))
 		}
 	}
 
 	if cmd.Flags().Changed("assert-body") {
 		v, _ := cmd.Flags().GetString("assert-body")
-		res = append(res, mustCompileAssertion("--assert-body", v, AssertBodyMatch))
+		res = append(res, mustCompileAssertion("--assert-body", v, ha.AssertBodyMatch))
 	}
 	if cmd.Flags().Changed("assert-body-eq") {
 		v, _ := cmd.Flags().GetString("assert-body-eq")
-		res = append(res, AssertBodyEqual(v))
+		res = append(res, ha.AssertBodyEqual(v))
 	}
 
 	// One assertion per occurrence. --assert-jq is a stringArray, so rejectRepeats
@@ -967,30 +958,30 @@ func parseAssertionFlags(cmd *cobra.Command) []Assertion {
 	if cmd.Flags().Changed("assert-jq") {
 		vs, _ := cmd.Flags().GetStringArray("assert-jq")
 		for _, v := range vs {
-			res = append(res, mustCompileAssertion("--assert-jq", v, AssertJQ))
+			res = append(res, mustCompileAssertion("--assert-jq", v, ha.AssertJQ))
 		}
 	}
 
 	return res
 }
 
-func parseHeaderAssertions(vs []string, exactMatch bool) []Assertion {
-	var res []Assertion
+func parseHeaderAssertions(vs []string, exactMatch bool) []ha.Assertion {
+	var res []ha.Assertion
 
 	for _, v := range vs {
 		name, value := parseHeaderLine(v)
 		if exactMatch {
 			if value == "" {
-				res = append(res, AssertHeaderPresent(name))
+				res = append(res, ha.AssertHeaderPresent(name))
 			} else {
-				res = append(res, AssertHeaderEqual(name, value))
+				res = append(res, ha.AssertHeaderEqual(name, value))
 			}
 		} else {
 			if value == "" {
-				res = append(res, AssertHeaderPresent(name))
+				res = append(res, ha.AssertHeaderPresent(name))
 			} else {
 				res = append(res, mustCompileAssertion("--assert-header", value,
-					func(p string) (Assertion, error) { return AssertHeaderMatch(name, p) }))
+					func(p string) (ha.Assertion, error) { return ha.AssertHeaderMatch(name, p) }))
 			}
 		}
 	}
@@ -1047,7 +1038,7 @@ var errTooManyRedirects = errors.New("too many redirects")
 // case retrying exists for is waiting for a service to come up, and there the
 // response usually arrives perfectly well and says the wrong thing, so a rule
 // that retried only transport errors would miss the whole point.
-func (c Client) Do(req *http.Request, assertions ...Assertion) error {
+func (c Client) Do(req *http.Request, assertions ...ha.Assertion) error {
 	if len(assertions) == 0 {
 		// Not a failed attempt but a malformed invocation, so it is reported
 		// once rather than retried into the ground. The CLI checks this before
@@ -1099,7 +1090,7 @@ func (c Client) giveUp(attempts int, limit string, err error) error {
 }
 
 // doOnce performs one request and checks it against every assertion.
-func (c Client) doOnce(client *http.Client, req *http.Request, assertions []Assertion) error {
+func (c Client) doOnce(client *http.Client, req *http.Request, assertions []ha.Assertion) error {
 	next, err := cloneForAttempt(req)
 	if err != nil {
 		var b strings.Builder
@@ -1119,7 +1110,7 @@ func (c Client) doOnce(client *http.Client, req *http.Request, assertions []Asse
 	// the server, not the operator. It stays opt-in for exactly that reason,
 	// and net/http drops Authorization and Cookie when a hop leaves the
 	// original domain, so credentials passed with -H do not travel.
-	res, err := client.Do(req) // #nosec G704 - user asked for this URL
+	result, err := (ha.Client{HTTPClient: client}).Do(req, assertions...) // #nosec G704 - user asked for this URL
 	if err != nil {
 		var b strings.Builder
 		// The transport did its job here; this program stopped the chain.
@@ -1139,37 +1130,28 @@ func (c Client) doOnce(client *http.Client, req *http.Request, assertions []Asse
 		c.writeHttpDetails(&b, req, nil)
 		return &exitError{exitTransportFail, b.String()}
 	}
-	defer func() { _ = res.Body.Close() }()
 
-	c.logInfo("[:] %s %s\n", res.Proto, res.Status)
-	httpRes := &httpResponse{Response: res}
-	httpRes.BodyBytes, _ = io.ReadAll(res.Body)
-	httpRes.decodeBody()
-
-	var assertErrors []error
-	for i := range assertions {
-		// A failed assertion and one that could not be evaluated are both
-		// failures of the run and both print the same way, so they share a
-		// list -- which is also what keeps the dump in the order the
-		// assertions were given. Only a machine-readable consumer needs to
-		// tell them apart, and that is what Check separates them for (#45).
-		f, err := assertions[i].Check(httpRes)
-		switch {
-		case err != nil:
-			assertErrors = append(assertErrors, err)
-		case f != nil:
-			assertErrors = append(assertErrors, f)
+	c.logInfo("[:] %s %s\n", result.Response.Proto, result.Response.Status)
+	failed := 0
+	for _, outcome := range result.Outcomes {
+		if !outcome.Passed() {
+			failed++
 		}
 	}
-	if len(assertErrors) > 0 {
+	if failed > 0 {
 		c.logInfo("[-] FAILED %s\n\n", time.Since(startedAt))
 
 		var b strings.Builder
-		fmt.Fprintf(&b, "%d assertions failed:\n", len(assertErrors))
-		for i := range assertErrors {
-			fmt.Fprintf(&b, "- %s\n", assertErrors[i])
+		fmt.Fprintf(&b, "%d assertions failed:\n", failed)
+		for _, outcome := range result.Outcomes {
+			switch {
+			case outcome.Err != nil:
+				fmt.Fprintf(&b, "- %s\n", formatEvaluationError(outcome.Err))
+			case outcome.Failure != nil:
+				fmt.Fprintf(&b, "- %s\n", formatFailure(outcome.Failure, result.Response))
+			}
 		}
-		c.writeHttpDetails(&b, req, httpRes)
+		c.writeHttpDetails(&b, req, result.Response)
 		return &exitError{exitAssertFail, b.String()}
 	}
 
@@ -1202,7 +1184,7 @@ func cloneForAttempt(req *http.Request) (*http.Request, error) {
 	return res, nil
 }
 
-func (c Client) writeHttpDetails(w io.Writer, req *http.Request, res *httpResponse) {
+func (c Client) writeHttpDetails(w io.Writer, req *http.Request, res *ha.Response) {
 	_, _ = fmt.Fprintf(w, "\nFAILED: %s %s (%s)\n\n", req.Method, req.URL, req.Proto)
 	// With --location the response below came from somewhere else, and the
 	// request dumped after this is the one that started the chain rather than
@@ -1214,7 +1196,7 @@ func (c Client) writeHttpDetails(w io.Writer, req *http.Request, res *httpRespon
 	writeRequest(w, req)
 	_, _ = w.Write([]byte("\n\n"))
 	if res != nil {
-		res.writeTo(w, c.LogLevel >= LInfo)
+		writeResponse(w, res, c.LogLevel >= LInfo)
 		_, _ = w.Write([]byte("\n\n"))
 	}
 }
@@ -1275,8 +1257,8 @@ func (c Client) getHttpClient() *http.Client {
 		// saw the payload or a compressed blob depended on flags that have
 		// nothing to do with the body (#27).
 		//
-		// Decoding is done here instead, in decodeBody, on every response. One
-		// path, and the request carries exactly the headers it was told to.
+		// Decoding is done by the library on every response instead. One path,
+		// and the request carries exactly the headers it was told to.
 		DisableCompression:    true,
 		MaxIdleConns:          10,
 		IdleConnTimeout:       20 * time.Second,
@@ -1344,172 +1326,10 @@ func (c Client) log(l LogLevel, format string, args ...interface{}) {
 	fmt.Fprint(os.Stderr, c.Palette.line(fmt.Sprintf(format, args...)))
 }
 
-type httpResponse struct {
-	*http.Response
-	BodyBytes []byte
-	// Encoding is the response's Content-Encoding, verbatim, and empty when
-	// there was none.
-	//
-	// The header itself is left alone. net/http deletes it (and Content-Length)
-	// when it decodes, which makes a response that was compressed
-	// indistinguishable from one that never was -- and the whole reason to set
-	// Accept-Encoding by hand is to find out which happened.
-	Encoding string
-	// DecodeErr is why BodyBytes is still encoded. Nil means BodyBytes is the
-	// payload, whether or not anything had to be removed to get there.
-	DecodeErr error
-	// The decoded JSON body, filled by decodeJSON on first use. Plain fields
-	// rather than a sync.Once because httpResponse is passed around by value in
-	// places, and a value copy of a mutex is what go vet exists to catch.
-	jsonBody   any
-	jsonErr    error
-	jsonParsed bool
-}
-
-// decodeJSON decodes the body as JSON once and shares the result.
-//
-// Every --assert-jq in a run reads the same response, so ten queries should
-// parse it once rather than ten times. Failure is reported as a property of the
-// body, not of the query: a response that is not JSON fails every jq assertion
-// for the same reason, and saying so once per assertion is clearer than saying
-// the expression did not hold.
-func (r *httpResponse) decodeJSON() (any, error) {
-	if r.jsonParsed {
-		return r.jsonBody, r.jsonErr
-	}
-	r.jsonParsed = true
-
-	// Through bodyOf like every other body assertion, so a body that is still
-	// compressed reports that rather than reporting invalid JSON (#27).
-	body, err := bodyOf(r)
-	if err != nil {
-		r.jsonErr = err
-		return nil, r.jsonErr
-	}
-
-	if err := json.Unmarshal(body, &r.jsonBody); err != nil {
-		r.jsonErr = fmt.Errorf("body: expected JSON, got %s", err)
-		return nil, r.jsonErr
-	}
-
-	return r.jsonBody, nil
-}
-
-// decoders maps a Content-Encoding to something that removes it. Content
-// coding names are case-insensitive per RFC 9110, so lookups are lowered.
-//
-// deflate is absent by name because it is two formats: RFC 9110 says zlib, and
-// a good deal of the web sends raw. decodeDeflate tries both.
-var decoders = map[string]func([]byte) ([]byte, error){
-	"gzip":    decodeGzip,
-	"deflate": decodeDeflate,
-	"br":      decodeBrotli,
-	"zstd":    decodeZstd,
-}
-
-// supportedCodings names the decoders in a stable order, so the failure for an
-// encoding with no decoder can say what it does have without drifting from the
-// map as it grows.
-func supportedCodings() string {
-	return strings.Join(slices.Sorted(maps.Keys(decoders)), ", ")
-}
-
-// decodeBody removes the Content-Encoding from BodyBytes, leaving every header
-// exactly as it arrived.
-//
-// An encoding nothing here can remove is not an error by itself: a response
-// body the tool cannot read still has a status and headers worth asserting on.
-// It is recorded instead, and only the body assertions refuse (see bodyOf).
-func (r *httpResponse) decodeBody() {
-	r.Encoding = strings.TrimSpace(r.Header.Get("Content-Encoding"))
-
-	// An empty body has nothing to decode, and an empty gzip stream is an error
-	// rather than an empty payload -- so a 204 that carries the header anyway
-	// must not fail --assert-body-empty.
-	if len(r.BodyBytes) == 0 {
-		return
-	}
-
-	switch enc := strings.ToLower(r.Encoding); enc {
-	case "", "identity":
-		return
-	default:
-		decode, ok := decoders[enc]
-		if !ok {
-			r.DecodeErr = fmt.Errorf("no decoder for %q; %s are supported", r.Encoding, supportedCodings())
-			return
-		}
-
-		b, err := decode(r.BodyBytes)
-		if err != nil {
-			r.DecodeErr = err
-			return
-		}
-		r.BodyBytes = b
-	}
-}
-
-// decodeBrotli removes a brotli coding. There is no brotli in the standard
-// library, which is the whole reason this took a dependency; andybalholm/brotli
-// is pure Go and brings nothing else with it.
-func decodeBrotli(b []byte) ([]byte, error) {
-	return io.ReadAll(brotli.NewReader(bytes.NewReader(b)))
-}
-
-// decodeZstd removes a zstd coding (RFC 8878).
-//
-// klauspost/compress is a large repository, but only the zstd package links
-// into the binary, so the cost is the decoder rather than the library.
-func decodeZstd(b []byte) ([]byte, error) {
-	zr, err := zstd.NewReader(bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	defer zr.Close()
-
-	return io.ReadAll(zr)
-}
-
-func decodeGzip(b []byte) ([]byte, error) {
-	zr, err := gzip.NewReader(bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = zr.Close() }()
-
-	return io.ReadAll(zr)
-}
-
-// decodeDeflate tries zlib first and raw DEFLATE second.
-//
-// RFC 9110 defines the deflate coding as the zlib format, but servers sending
-// raw DEFLATE under the same name are common enough that net/http declines to
-// negotiate it at all ("Deflate is ambiguous and not as universally supported
-// anyway", transport.go). Guessing is safe here because neither reader accepts
-// the other's input: a wrong guess fails rather than producing plausible bytes.
-func decodeDeflate(b []byte) ([]byte, error) {
-	if zr, err := zlib.NewReader(bytes.NewReader(b)); err == nil {
-		defer func() { _ = zr.Close() }()
-		if out, err := io.ReadAll(zr); err == nil {
-			return out, nil
-		}
-	}
-
-	fr := flate.NewReader(bytes.NewReader(b))
-	defer func() { _ = fr.Close() }()
-
-	out, err := io.ReadAll(fr)
-	if err != nil {
-		return nil, fmt.Errorf("not valid zlib or raw DEFLATE: %w", err)
-	}
-
-	return out, nil
-}
-
 // maxPayloadBytes is how much of a body the failure dump shows before cropping.
 const maxPayloadBytes = 256
 
-// writeTo renders the response for a person reading a failure report.
+// writeResponse renders the response for a person reading a failure report.
 //
 // Deliberately not http.Response.Write. That is a wire-format serializer: it
 // honours ContentLength and Transfer-Encoding, which describe the body that
@@ -1523,7 +1343,7 @@ const maxPayloadBytes = 256
 //
 // Write errors are ignored, following utils.go, because every caller renders
 // into an in-memory strings.Builder that cannot fail.
-func (r httpResponse) writeTo(w io.Writer, withBody bool) {
+func writeResponse(w io.Writer, r *ha.Response, withBody bool) {
 	_, _ = fmt.Fprintf(w, "%s %s\n", r.Proto, r.Status)
 	writeHeaders(w, r.Header)
 	_, _ = fmt.Fprintln(w)

@@ -72,6 +72,7 @@ different answer, the deviation is deliberate, and
 ## Contents
 
 - [Installation](#installation)
+- [Go Library](#go-library)
 - [Usage](#usage): [request options](#request-options),
   [assertions](#assertion-options), [JSON](#json-assertions),
   [redirects](#redirects), [retries](#retries), [compression](#compression),
@@ -119,8 +120,50 @@ http-assert completion zsh --help   # per-shell install instructions
 Requires Go 1.26 or newer. A release binary needs no Go toolchain at all.
 
 ```bash
-go install github.com/korya/http-assert@latest
+go install github.com/korya/http-assert/cmd/http-assert@latest
 ```
+
+## Go Library
+
+The same assertions are available to Go programs. Import the package as `ha`
+to keep calls compact and distinct from `net/http`:
+
+```go
+package healthcheck
+
+import (
+	"net/http"
+
+	ha "github.com/korya/http-assert"
+)
+
+func Check(url string) (*ha.Result, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return (ha.Client{}).Do(
+		req,
+		ha.AssertStatusOK(),
+		ha.AssertHeaderEqual("Content-Type", "application/json"),
+	)
+}
+```
+
+`Client.Do` calls the configured HTTP client once and never retries. A returned
+error means no complete response was available, such as a transport or
+body-read failure. With a nil error, `Result.Outcomes` contains one result per
+assertion, in call order; `Result.Passed()` is the convenient aggregate verdict.
+Failures expose a code, kind, target, expected value and actual value instead of
+preformatted text, so the calling application controls presentation. Evaluation
+errors such as invalid JSON remain distinct from responses that were evaluated
+and failed.
+
+The zero-value client uses `http.DefaultClient`. Supply `HTTPClient` to control
+timeouts, transports, TLS and redirects; redirects may involve multiple HTTP
+requests according to that client's policy. Retry policy, logging and CLI
+output intentionally remain outside the library API.
 
 ## Usage
 
@@ -655,7 +698,7 @@ v3.0; see [LICENSE](LICENSE).
 ```bash
 git clone https://github.com/korya/http-assert.git
 cd http-assert
-go build -o http-assert .
+go build -o http-assert ./cmd/http-assert
 ```
 
 ### Working on the Code
@@ -671,7 +714,8 @@ just test-cover   # merged unit + end-to-end coverage
 ```
 
 The end-to-end tests are opt-in: `go test ./...` runs the unit tests only, and
-`-e2e` (or the recipes above) switches the full suite on.
+`go test ./cmd/http-assert -e2e` (or the recipes above) switches the full suite
+on.
 
 ### Releasing
 

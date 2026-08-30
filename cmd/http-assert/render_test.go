@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	ha "github.com/korya/http-assert"
 )
 
 // response builds the shape Client.Do hands to the renderer: a real
 // *http.Response plus the body already read off the wire.
-func response(status string, header http.Header, body string) httpResponse {
-	return httpResponse{
+func response(status string, header http.Header, body string) ha.Response {
+	return ha.Response{
 		Response: &http.Response{
 			Proto:  "HTTP/1.1",
 			Status: status,
@@ -25,14 +27,14 @@ func response(status string, header http.Header, body string) httpResponse {
 	}
 }
 
-func Test_httpResponse_writeTo(t *testing.T) {
+func Test_writeResponse(t *testing.T) {
 	t.Parallel()
 
 	plain := http.Header{"Content-Type": {"text/plain"}}
 
 	tests := []struct {
 		Name     string
-		Response httpResponse
+		Response ha.Response
 		WithBody bool
 		Want     string
 	}{{
@@ -81,7 +83,7 @@ func Test_httpResponse_writeTo(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
 			var b strings.Builder
-			tc.Response.writeTo(&b, tc.WithBody)
+			writeResponse(&b, &tc.Response, tc.WithBody)
 
 			if got := b.String(); got != tc.Want {
 				t.Errorf("writeTo()\n got: %q\nwant: %q", got, tc.Want)
@@ -90,14 +92,15 @@ func Test_httpResponse_writeTo(t *testing.T) {
 	}
 }
 
-// Test_httpResponse_writeToCrops covers the branch that reports hidden bytes.
+// Test_writeResponseCrops covers the branch that reports hidden bytes.
 // It is separate because the expected text depends on the crop limit.
-func Test_httpResponse_writeToCrops(t *testing.T) {
+func Test_writeResponseCrops(t *testing.T) {
 	t.Parallel()
 
 	body := strings.Repeat("x", maxPayloadBytes+17)
 	var b strings.Builder
-	response("200 OK", http.Header{}, body).writeTo(&b, true)
+	res := response("200 OK", http.Header{}, body)
+	writeResponse(&b, &res, true)
 
 	got := b.String()
 	if want := strings.Repeat("x", maxPayloadBytes); !strings.Contains(got, want) {
@@ -116,8 +119,8 @@ func Test_writeTo_ignoresTransportFraming(t *testing.T) {
 	t.Parallel()
 
 	var b strings.Builder
-	response("200 OK", http.Header{"Content-Type": {"text/plain"}}, "boom").
-		writeTo(&b, false)
+	res := response("200 OK", http.Header{"Content-Type": {"text/plain"}}, "boom")
+	writeResponse(&b, &res, false)
 
 	for _, unwanted := range []string{"chunked", "Transfer-Encoding", "\r"} {
 		if strings.Contains(b.String(), unwanted) {

@@ -1,4 +1,4 @@
-package main
+package httpassert
 
 import (
 	"bytes"
@@ -7,6 +7,9 @@ import (
 	"compress/zlib"
 	"net/http"
 	"testing"
+
+	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 )
 
 const payload = `{"status":"success"}`
@@ -59,10 +62,41 @@ func deflatedZlib(t *testing.T, s string) []byte {
 	return b.Bytes()
 }
 
+func brotliEncoded(t *testing.T, s string) []byte {
+	t.Helper()
+
+	var b bytes.Buffer
+	w := brotli.NewWriter(&b)
+	if _, err := w.Write([]byte(s)); err != nil {
+		t.Fatalf("cannot encode Brotli: %s", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("cannot close the Brotli writer: %s", err)
+	}
+	return b.Bytes()
+}
+
+func zstdEncoded(t *testing.T, s string) []byte {
+	t.Helper()
+
+	var b bytes.Buffer
+	w, err := zstd.NewWriter(&b)
+	if err != nil {
+		t.Fatalf("cannot build the zstd writer: %s", err)
+	}
+	if _, err := w.Write([]byte(s)); err != nil {
+		t.Fatalf("cannot encode zstd: %s", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("cannot close the zstd writer: %s", err)
+	}
+	return b.Bytes()
+}
+
 // encoded builds the shape decodeBody operates on: a body and the header that
-// claims how it was encoded. It reuses render_test.go's response helper so both
-// files describe an httpResponse the same way.
-func encoded(enc string, body []byte) *httpResponse {
+// claims how it was encoded. It reuses the shared response helper so the tests
+// describe a Response consistently.
+func encoded(enc string, body []byte) *Response {
 	h := http.Header{}
 	if enc != "" {
 		h.Set("Content-Encoding", enc)
@@ -128,6 +162,20 @@ func Test_decodeBody(t *testing.T) {
 			WantEncoding: "gzip",
 		},
 		{
+			Name:         "Brotli",
+			Enc:          "br",
+			Body:         brotliEncoded(t, payload),
+			Want:         payload,
+			WantEncoding: "br",
+		},
+		{
+			Name:         "zstd",
+			Enc:          "zstd",
+			Body:         zstdEncoded(t, payload),
+			Want:         payload,
+			WantEncoding: "zstd",
+		},
+		{
 			// The two formats that share the deflate name. Neither reader
 			// accepts the other's input, so trying both is safe.
 			Name:         "deflate, raw",
@@ -165,6 +213,27 @@ func Test_decodeBody(t *testing.T) {
 			Body:         gzipped(t, payload)[:10],
 			WantErr:      true,
 			WantEncoding: "gzip",
+		},
+		{
+			Name:         "invalid Brotli",
+			Enc:          "br",
+			Body:         []byte{0xff},
+			WantErr:      true,
+			WantEncoding: "br",
+		},
+		{
+			Name:         "invalid zstd",
+			Enc:          "zstd",
+			Body:         []byte("not zstd"),
+			WantErr:      true,
+			WantEncoding: "zstd",
+		},
+		{
+			Name:         "truncated zlib-wrapped deflate",
+			Enc:          "deflate",
+			Body:         deflatedZlib(t, payload)[:10],
+			WantErr:      true,
+			WantEncoding: "deflate",
 		},
 		{
 			// A 204 that carries the header anyway. There is nothing to decode,
@@ -268,9 +337,10 @@ func Test_bodyAssertionsRefuseAnEncodedBody(t *testing.T) {
 	}
 
 	assertions := map[string]Assertion{
-		"AssertBodyMatch": match,
-		"AssertBodyEqual": AssertBodyEqual(payload),
-		"AssertBodyEmpty": AssertBodyEmpty(),
+		"AssertBodyMatch":    match,
+		"AssertBodyEqual":    AssertBodyEqual(payload),
+		"AssertBodyEmpty":    AssertBodyEmpty(),
+		"AssertBodyNotEmpty": AssertBodyNotEmpty(),
 	}
 
 	for name, a := range assertions {
