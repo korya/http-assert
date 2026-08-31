@@ -55,11 +55,13 @@ jobs:
         # configuration. Without this the linter runs twice per build.
         install-only: true
 
-    - name: Install gosec
-      run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+    - name: Run gosec
+      uses: securego/gosec@master
+      with:
+        args: ./...
 
-    - name: Run the static checks
-      run: just static-checks
+    - name: Run the remaining static checks
+      run: just build tidy-check lint-config-check vet lint
 
   # The tool ships for five platforms, and it is less OS-neutral than it looks:
   # socket timeout behaviour, colon parsing around IPv6 literals, printable-rune
