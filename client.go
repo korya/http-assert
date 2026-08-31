@@ -41,10 +41,10 @@ const (
 // satisfy the assertion.
 type EvaluationError struct {
 	Code     EvaluationErrorCode
-	Kind     AssertionKind
-	Target   string
-	Encoding string
-	Cause    error
+	Kind     AssertionKind // assertion family; Client and built-in assertions populate it
+	Target   string        // jq query or "" when the evaluation needs no subject
+	Encoding string        // response content encoding for body-decode errors
+	Cause    error         // underlying decoder, JSON, context, or jq error
 }
 
 func (e *EvaluationError) Error() string {
@@ -65,8 +65,10 @@ func (e *EvaluationError) Unwrap() error {
 	return e.Cause
 }
 
-// Outcome is the result of evaluating one assertion. Passed reports whether
-// both Failure and Err are nil.
+// Outcome is the result of evaluating one assertion. Client.Do guarantees that
+// Failure and Err are not both set; an error from a custom assertion takes
+// precedence over a simultaneously returned failure. Passed reports whether
+// both are nil.
 type Outcome struct {
 	Kind    AssertionKind
 	Failure *Failure
@@ -151,9 +153,7 @@ func (c Client) Do(req *http.Request, assertions ...Assertion) (*Result, error) 
 	for _, assertion := range assertions {
 		failure, checkErr := assertion.Check(httpRes)
 		kind := assertion.Kind()
-		if failure != nil {
-			failure.Kind = kind
-		}
+		failure, checkErr = normalizeOutcome(kind, failure, checkErr)
 		result.Outcomes = append(result.Outcomes, Outcome{
 			Kind:    kind,
 			Failure: failure,

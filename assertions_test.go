@@ -788,3 +788,20 @@ func Test_AssertionCheckSeparatesFailureFromError(t *testing.T) {
 		}
 	})
 }
+
+func Test_AssertionCheckStampsEvaluationErrorKind(t *testing.T) {
+	t.Parallel()
+
+	assertion := Must(AssertJQ(".healthy"))
+	failure, err := assertion.Check(jqResponse("not JSON"))
+	if failure != nil {
+		t.Fatalf("Failure = %+v, want nil for an evaluation error", failure)
+	}
+	var evaluation *EvaluationError
+	if !errors.As(err, &evaluation) {
+		t.Fatalf("error = %T %v, want *EvaluationError", err, err)
+	}
+	if evaluation.Code != EvaluationJSON || evaluation.Kind != assertion.Kind() {
+		t.Errorf("EvaluationError = %+v, want JSON error for %q assertion", evaluation, assertion.Kind())
+	}
+}

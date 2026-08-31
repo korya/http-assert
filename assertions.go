@@ -2,6 +2,7 @@ package httpassert
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -38,7 +39,11 @@ type Assertion interface {
 	// Kind names the family this assertion belongs to.
 	Kind() AssertionKind
 
-	// Check reports (nil, nil) when the assertion holds.
+	// Check reports exactly one of three states: (nil, nil) when the assertion
+	// holds; (failure, nil) when the response does not satisfy it; or
+	// (nil, error) when no verdict could be reached. Implementations must not
+	// return both a failure and an error. Client.Do treats an error as
+	// authoritative if a custom implementation violates that contract.
 	Check(res *Response) (*Failure, error)
 }
 
@@ -89,15 +94,29 @@ type assertionFunc struct {
 
 func (a assertionFunc) Kind() AssertionKind { return a.kind }
 
-// Check stamps the failure with the assertion's kind, so Kind() and
-// Failure.Kind cannot disagree and no constructor has to repeat itself.
+// Check normalizes the outcome so its structured kind cannot disagree with
+// Kind() and no constructor has to repeat itself.
 func (a assertionFunc) Check(res *Response) (*Failure, error) {
 	f, err := a.check(res)
-	if f != nil {
-		f.Kind = a.kind
-	}
+	return normalizeOutcome(a.kind, f, err)
+}
 
-	return f, err
+// normalizeOutcome stamps structured results with the assertion family and
+// defensively preserves the interface's mutually exclusive result states.
+// An evaluation error wins over a failure because it means no valid verdict
+// exists to describe as Expected versus Actual.
+func normalizeOutcome(kind AssertionKind, failure *Failure, err error) (*Failure, error) {
+	if err != nil {
+		var evaluation *EvaluationError
+		if errors.As(err, &evaluation) && evaluation != nil {
+			evaluation.Kind = kind
+		}
+		return nil, err
+	}
+	if failure != nil {
+		failure.Kind = kind
+	}
+	return failure, nil
 }
 
 func newAssertion(kind AssertionKind, check func(res *Response) (*Failure, error)) Assertion {

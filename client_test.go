@@ -158,6 +158,42 @@ func TestClientDoPerformsOneRequestAndChecksEveryAssertionInOrder(t *testing.T) 
 	}
 }
 
+func TestClientDoNormalizesCustomAssertionOutcome(t *testing.T) {
+	cause := errors.New("cannot decide")
+	assertion := testAssertion{kind: "custom", check: func(*Response) (*Failure, error) {
+		return &Failure{Code: FailureBodyEqual}, &EvaluationError{
+			Code:  EvaluationJQ,
+			Kind:  "wrong",
+			Cause: cause,
+		}
+	}}
+	client := Client{HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       http.NoBody,
+			Request:    req,
+		}, nil
+	})}}
+
+	result, err := client.Do(request(t), assertion)
+	if err != nil {
+		t.Fatalf("Do: %s", err)
+	}
+	outcome := result.Outcomes[0]
+	if outcome.Failure != nil {
+		t.Errorf("Failure = %+v, want nil when assertion also returned an error", outcome.Failure)
+	}
+	var evaluation *EvaluationError
+	if !errors.As(outcome.Err, &evaluation) {
+		t.Fatalf("Err = %T %v, want *EvaluationError", outcome.Err, outcome.Err)
+	}
+	if evaluation.Kind != assertion.Kind() || !errors.Is(evaluation, cause) {
+		t.Errorf("EvaluationError = %+v, want kind %q wrapping cause", evaluation, assertion.Kind())
+	}
+}
+
 func TestClientDoUsesPackageDefaultClient(t *testing.T) {
 	original := defaultHTTPClient
 	t.Cleanup(func() { defaultHTTPClient = original })
@@ -226,6 +262,9 @@ func TestClientDoReturnsPartialResponseOnReadError(t *testing.T) {
 	}
 	if got := string(result.Response.BodyBytes); got != "partial" {
 		t.Errorf("partial body = %q", got)
+	}
+	if result.Response.DecodeErr != nil {
+		t.Errorf("DecodeErr = %v, want nil because decoding was not attempted", result.Response.DecodeErr)
 	}
 	if !body.closed {
 		t.Error("response body was not closed after read error")
