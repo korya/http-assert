@@ -15,8 +15,9 @@ are marked **Breaking** and listed first in their section.
   client, structured results and all response assertion constructors. The
   library invokes its configured HTTP client once and leaves retries, logging
   and presentation to its caller.
-- `ha.Must(...)` keeps assertions built from static expressions inline while
-  preserving the constructors' explicit error returns for runtime input.
+- Generic `ha.Must(...)` keeps values built from static input inline, including
+  HTTP requests and assertions, while preserving explicit errors for runtime
+  input.
 
 ### Changed
 
