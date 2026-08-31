@@ -32,6 +32,11 @@ are marked **Breaking** and listed first in their section.
   of the unbounded `http.DefaultClient`. Callers can still inject an HTTP client
   or apply a shorter request-context deadline.
 
+### Fixed
+
+- jq evaluation stops when its response request's context is cancelled while
+  retaining the package's ten-second safety ceiling.
+
 ## [0.3.0] - 2026-08-11
 
 ### Added

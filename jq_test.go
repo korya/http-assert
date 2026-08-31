@@ -1,6 +1,7 @@
 package httpassert
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -230,6 +231,46 @@ func Test_AssertJQ_boundsARunawayQuery(t *testing.T) {
 				t.Fatal("still running long past the deadline")
 			}
 		})
+	}
+}
+
+func Test_AssertJQ_honorsRequestCancellation(t *testing.T) {
+	t.Parallel()
+
+	assertion, err := AssertJQ(`def f: f; f`)
+	if err != nil {
+		t.Fatalf("AssertJQ: %s", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.test/health", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext: %s", err)
+	}
+	res := jqResponse(jqDoc)
+	res.Request = req
+	cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		failure, checkErr := assertion.Check(res)
+		if failure != nil {
+			checkErr = errors.New("cancelled query returned an assertion failure")
+		}
+		done <- checkErr
+	}()
+
+	select {
+	case checkErr := <-done:
+		if !errors.Is(checkErr, context.Canceled) {
+			t.Fatalf("error = %v, want context.Canceled", checkErr)
+		}
+		var evaluation *EvaluationError
+		if !errors.As(checkErr, &evaluation) || evaluation.Code != EvaluationJQ {
+			t.Errorf("error = %T %+v, want jq EvaluationError", checkErr, evaluation)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("jq evaluation ignored the cancelled request context")
 	}
 }
 

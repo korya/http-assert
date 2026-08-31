@@ -431,16 +431,13 @@ func AssertBodyEmpty() Assertion {
 // jqTimeout bounds the evaluation of one --assert-jq query.
 //
 // jq is a real language, so a query can simply never finish: `def f: f; f`
-// compiles cleanly and runs forever. Nothing else a caller can type makes this
-// program hang -- the request is bounded by --max-time, the retry loop by
-// --retry, and an --assert-body pattern cannot blow up because Go's regexp
-// engine is linear-time. This keeps that property rather than trading it away.
+// compiles cleanly and runs forever. The response request's context is the
+// primary cancellation signal, so its earlier deadline wins. This timeout is
+// the backstop for a context without a deadline and for a Response constructed
+// directly without an http.Request.
 //
-// It is not a budget for real work, and deliberately is not --max-time: that
-// bounds a request, and reusing it here would make a run take twice the number
-// the caller set. Measured queries finish in tens of microseconds, so ten
-// seconds is six orders of magnitude of headroom that no genuine assertion can
-// reach.
+// Measured queries finish in tens of microseconds, so ten seconds is six orders
+// of magnitude of headroom that no genuine assertion can reach.
 const jqTimeout = 10 * time.Second
 
 // AssertJQ asserts that a jq expression holds against the response body.
@@ -449,6 +446,8 @@ const jqTimeout = 10 * time.Second
 // value, which is what keeps this to one flag: jq already has types,
 // comparison and regexp, so there is no separator to invent, no ~= variant,
 // and no question of whether 5 means the number or the string.
+// Evaluation stops when the response request's context is cancelled and is
+// always bounded by the package's jq timeout.
 func AssertJQ(query string) (Assertion, error) {
 	q, err := gojq.Parse(query)
 	if err != nil {
@@ -477,7 +476,11 @@ func runJQ(code *gojq.Code, query string, res *Response, timeout time.Duration) 
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	parent := context.Background()
+	if res.Response != nil && res.Request != nil {
+		parent = res.Request.Context()
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 
 	outputs := 0
