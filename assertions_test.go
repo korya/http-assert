@@ -670,7 +670,7 @@ func Test_AssertionIdentity(t *testing.T) {
 		Name      string
 		Assertion Assertion
 		Res       *Response
-		Kind      string
+		Kind      AssertionKind
 		Target    string
 		Expected  any
 		Actual    any
@@ -678,43 +678,43 @@ func Test_AssertionIdentity(t *testing.T) {
 		{
 			Name: "ok", Assertion: AssertStatusOK(),
 			Res:  statusRes(500, "500 Internal Server Error"),
-			Kind: "ok", Expected: "2xx-3xx", Actual: 500,
+			Kind: KindStatusOK, Expected: "2xx-3xx", Actual: 500,
 		},
 		{
 			Name: "nok", Assertion: AssertStatusNOK(),
 			Res:  statusRes(200, "200 OK"),
-			Kind: "nok", Expected: "not 2xx-3xx", Actual: 200,
+			Kind: KindStatusNOK, Expected: "not 2xx-3xx", Actual: 200,
 		},
 		{
 			Name: "status", Assertion: mustStatusAssertion(t, "200"),
 			Res:  statusRes(500, "500 Internal Server Error"),
-			Kind: "status", Expected: "200", Actual: 500,
+			Kind: KindStatus, Expected: "200", Actual: 500,
 		},
 		{
 			Name: "header present", Assertion: AssertHeaderPresent("X-Absent"),
 			Res:  headerRes(http.Header{}),
-			Kind: "header", Target: "X-Absent", Expected: "present",
+			Kind: KindHeader, Target: "X-Absent", Expected: "present",
 		},
 		{
 			Name: "header equal", Assertion: AssertHeaderEqual("X-A", "want"),
 			Res:  headerRes(http.Header{"X-A": []string{"got"}}),
-			Kind: "header", Target: "X-A", Expected: "want", Actual: []string{"got"},
+			Kind: KindHeader, Target: "X-A", Expected: "want", Actual: []string{"got"},
 		},
 		{
 			Name: "body equal", Assertion: AssertBodyEqual("want"),
 			Res:  &Response{BodyBytes: []byte("got")},
-			Kind: "body", Expected: "want", Actual: "got",
+			Kind: KindBody, Expected: "want", Actual: "got",
 		},
 		{
 			Name: "redirect", Assertion: AssertRedirectEqual("/there"),
 			Res: headerRes(http.Header{"Location": []string{"/elsewhere"}}),
 			// A 200 never reaches the Location comparison, so this is the
 			// precondition failure, which reports the status it wanted.
-			Kind: "redirect", Expected: "3xx", Actual: 200,
+			Kind: KindRedirect, Expected: "3xx", Actual: 200,
 		},
 		{
 			Name: "jq", Assertion: jq, Res: jqResponse(`{"n":2}`),
-			Kind: "jq", Target: ".n == 1", Expected: true, Actual: false,
+			Kind: KindJQ, Target: ".n == 1", Expected: true, Actual: false,
 		},
 	}
 

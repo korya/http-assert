@@ -53,7 +53,7 @@ func (r *Response) decodeJSON() (any, error) {
 	if err := json.Unmarshal(body, &r.jsonBody); err != nil {
 		r.jsonErr = &EvaluationError{
 			Code:  EvaluationJSON,
-			Kind:  "body",
+			Kind:  KindBody,
 			Cause: err,
 		}
 		return nil, r.jsonErr

@@ -11,6 +11,21 @@ import (
 	"github.com/itchyny/gojq"
 )
 
+// AssertionKind identifies an assertion family. Custom assertions may define
+// their own values; the constants below name the families built into this
+// package.
+type AssertionKind string
+
+const (
+	KindStatusOK  AssertionKind = "ok"
+	KindStatusNOK AssertionKind = "nok"
+	KindStatus    AssertionKind = "status"
+	KindHeader    AssertionKind = "header"
+	KindBody      AssertionKind = "body"
+	KindRedirect  AssertionKind = "redirect"
+	KindJQ        AssertionKind = "jq"
+)
+
 // Assertion checks one property of a response.
 //
 // Check separates the two things an assertion can report, which a single error
@@ -20,9 +35,8 @@ import (
 // failed run; the distinction exists so a machine-readable consumer can tell
 // "the service is wrong" from "we could not tell" (#45).
 type Assertion interface {
-	// Kind names the family this assertion belongs to: "ok", "nok",
-	// "status", "header", "body", "redirect" or "jq".
-	Kind() string
+	// Kind names the family this assertion belongs to.
+	Kind() AssertionKind
 
 	// Check reports (nil, nil) when the assertion holds.
 	Check(res *Response) (*Failure, error)
@@ -65,7 +79,7 @@ const (
 // Failure describes an assertion that was evaluated and did not hold. It is
 // deliberately data only: applications decide how (or whether) to format it.
 type Failure struct {
-	Kind     string // assertion family; Client and built-in assertions populate it
+	Kind     AssertionKind // assertion family; Client and built-in assertions populate it
 	Code     FailureCode
 	Target   string // header name, jq query, or "" when the kind needs no subject
 	Expected any
@@ -79,11 +93,11 @@ type Failure struct {
 // result needed to carry more than a string. Thirteen one-method structs would
 // have said the same thing at ten times the length.
 type assertionFunc struct {
-	kind  string
+	kind  AssertionKind
 	check func(res *Response) (*Failure, error)
 }
 
-func (a assertionFunc) Kind() string { return a.kind }
+func (a assertionFunc) Kind() AssertionKind { return a.kind }
 
 // Check stamps the failure with the assertion's kind, so Kind() and
 // Failure.Kind cannot disagree and no constructor has to repeat itself.
@@ -96,7 +110,7 @@ func (a assertionFunc) Check(res *Response) (*Failure, error) {
 	return f, err
 }
 
-func newAssertion(kind string, check func(res *Response) (*Failure, error)) Assertion {
+func newAssertion(kind AssertionKind, check func(res *Response) (*Failure, error)) Assertion {
 	return assertionFunc{kind: kind, check: check}
 }
 
@@ -228,7 +242,7 @@ func parseStatusCode(text string) (int, error) {
 
 // AssertStatusOK accepts any success or redirect status (2xx or 3xx).
 func AssertStatusOK() Assertion {
-	return newAssertion("ok", func(res *Response) (*Failure, error) {
+	return newAssertion(KindStatusOK, func(res *Response) (*Failure, error) {
 		if s := res.StatusCode; s < 200 || s >= 400 {
 			return &Failure{
 				Code:     FailureStatusOK,
@@ -243,7 +257,7 @@ func AssertStatusOK() Assertion {
 
 // AssertStatusNOK accepts any status outside the 2xx and 3xx ranges.
 func AssertStatusNOK() Assertion {
-	return newAssertion("nok", func(res *Response) (*Failure, error) {
+	return newAssertion(KindStatusNOK, func(res *Response) (*Failure, error) {
 		if s := res.StatusCode; s >= 200 && s < 400 {
 			return &Failure{
 				Code:     FailureStatusNOK,
@@ -269,7 +283,7 @@ func AssertStatus(text string) (Assertion, error) {
 }
 
 func assertStatus(spec statusSpec) Assertion {
-	return newAssertion("status", func(res *Response) (*Failure, error) {
+	return newAssertion(KindStatus, func(res *Response) (*Failure, error) {
 		if !spec.matches(res.StatusCode) {
 			return &Failure{
 				Code:     FailureStatus,
@@ -284,7 +298,7 @@ func assertStatus(spec statusSpec) Assertion {
 
 // AssertHeaderPresent requires at least one value for name.
 func AssertHeaderPresent(name string) Assertion {
-	return newAssertion("header", func(res *Response) (*Failure, error) {
+	return newAssertion(KindHeader, func(res *Response) (*Failure, error) {
 		if res.Header.Values(name) == nil {
 			return &Failure{
 				Code:     FailureHeaderPresent,
@@ -299,7 +313,7 @@ func AssertHeaderPresent(name string) Assertion {
 
 // AssertHeaderMissing requires name to be absent.
 func AssertHeaderMissing(name string) Assertion {
-	return newAssertion("header", func(res *Response) (*Failure, error) {
+	return newAssertion(KindHeader, func(res *Response) (*Failure, error) {
 		if vs := res.Header.Values(name); vs != nil {
 			return &Failure{
 				Code:     FailureHeaderMissing,
@@ -316,7 +330,7 @@ func AssertHeaderMissing(name string) Assertion {
 // AssertHeaderEqual accepts the response when any value of name equals
 // expValue.
 func AssertHeaderEqual(name, expValue string) Assertion {
-	return newAssertion("header", func(res *Response) (*Failure, error) {
+	return newAssertion(KindHeader, func(res *Response) (*Failure, error) {
 		vs := res.Header.Values(name)
 		if vs == nil {
 			return &Failure{
@@ -349,7 +363,7 @@ func AssertHeaderMatch(name, expPattern string) (Assertion, error) {
 		return nil, err
 	}
 
-	return newAssertion("header", func(res *Response) (*Failure, error) {
+	return newAssertion(KindHeader, func(res *Response) (*Failure, error) {
 		vs := res.Header.Values(name)
 		if vs == nil {
 			return &Failure{
@@ -385,7 +399,7 @@ func bodyOf(res *Response) ([]byte, error) {
 	if res.DecodeErr != nil {
 		return nil, &EvaluationError{
 			Code:     EvaluationBodyDecode,
-			Kind:     "body",
+			Kind:     KindBody,
 			Encoding: res.Encoding,
 			Cause:    res.DecodeErr,
 		}
@@ -396,7 +410,7 @@ func bodyOf(res *Response) ([]byte, error) {
 
 // AssertBodyEmpty requires the decoded response body to contain zero bytes.
 func AssertBodyEmpty() Assertion {
-	return newAssertion("body", func(res *Response) (*Failure, error) {
+	return newAssertion(KindBody, func(res *Response) (*Failure, error) {
 		body, err := bodyOf(res)
 		if err != nil {
 			return nil, err
@@ -450,7 +464,7 @@ func AssertJQ(query string) (Assertion, error) {
 		return nil, err
 	}
 
-	return newAssertion("jq", func(res *Response) (*Failure, error) {
+	return newAssertion(KindJQ, func(res *Response) (*Failure, error) {
 		return runJQ(code, query, res, jqTimeout)
 	}), nil
 }
@@ -486,7 +500,7 @@ func runJQ(code *gojq.Code, query string, res *Response, timeout time.Duration) 
 		if e, isErr := v.(error); isErr {
 			return nil, &EvaluationError{
 				Code:   EvaluationJQ,
-				Kind:   "jq",
+				Kind:   KindJQ,
 				Target: query,
 				Cause:  e,
 			}
@@ -520,7 +534,7 @@ func runJQ(code *gojq.Code, query string, res *Response, timeout time.Duration) 
 // AssertBodyNotEmpty requires the decoded response body to contain at least
 // one byte.
 func AssertBodyNotEmpty() Assertion {
-	return newAssertion("body", func(res *Response) (*Failure, error) {
+	return newAssertion(KindBody, func(res *Response) (*Failure, error) {
 		body, err := bodyOf(res)
 		if err != nil {
 			return nil, err
@@ -539,7 +553,7 @@ func AssertBodyNotEmpty() Assertion {
 
 // AssertBodyEqual requires the decoded response body to equal expContent.
 func AssertBodyEqual(expContent string) Assertion {
-	return newAssertion("body", func(res *Response) (*Failure, error) {
+	return newAssertion(KindBody, func(res *Response) (*Failure, error) {
 		body, err := bodyOf(res)
 		if err != nil {
 			return nil, err
@@ -576,7 +590,7 @@ func AssertBodyMatch(expPattern string) (Assertion, error) {
 		return nil, err
 	}
 
-	return newAssertion("body", func(res *Response) (*Failure, error) {
+	return newAssertion(KindBody, func(res *Response) (*Failure, error) {
 		body, err := bodyOf(res)
 		if err != nil {
 			return nil, err
@@ -631,7 +645,7 @@ func redirectPrecondition(res *Response, expected any) *Failure {
 // expLocation. Configure the HTTP client not to follow redirects when using
 // this assertion.
 func AssertRedirectEqual(expLocation string) Assertion {
-	return newAssertion("redirect", func(res *Response) (*Failure, error) {
+	return newAssertion(KindRedirect, func(res *Response) (*Failure, error) {
 		if f := redirectPrecondition(res, expLocation); f != nil {
 			return f, nil
 		}
@@ -658,7 +672,7 @@ func AssertRedirectMatch(expPattern string) (Assertion, error) {
 		return nil, err
 	}
 
-	return newAssertion("redirect", func(res *Response) (*Failure, error) {
+	return newAssertion(KindRedirect, func(res *Response) (*Failure, error) {
 		if f := redirectPrecondition(res, expPattern); f != nil {
 			return f, nil
 		}
