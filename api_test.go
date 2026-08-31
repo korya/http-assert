@@ -13,6 +13,14 @@ func (f exampleTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+type customAssertion struct{}
+
+func (customAssertion) Kind() ha.AssertionKind { return "custom" }
+
+func (customAssertion) Check(*ha.Response) (*ha.Failure, error) { return nil, nil }
+
+var _ ha.Assertion = customAssertion{}
+
 func ExampleClient_Do() {
 	req, _ := http.NewRequest(http.MethodGet, "https://example.test/health", nil)
 	client := ha.Client{HTTPClient: &http.Client{Transport: exampleTransport(func(req *http.Request) (*http.Response, error) {

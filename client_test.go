@@ -15,11 +15,11 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 type testAssertion struct {
-	kind  string
+	kind  AssertionKind
 	check func(*Response) (*Failure, error)
 }
 
-func (a testAssertion) Kind() string { return a.kind }
+func (a testAssertion) Kind() AssertionKind { return a.kind }
 
 func (a testAssertion) Check(res *Response) (*Failure, error) {
 	return a.check(res)
@@ -27,7 +27,7 @@ func (a testAssertion) Check(res *Response) (*Failure, error) {
 
 type pointerAssertion struct{}
 
-func (*pointerAssertion) Kind() string { return "pointer" }
+func (*pointerAssertion) Kind() AssertionKind { return "pointer" }
 
 func (*pointerAssertion) Check(*Response) (*Failure, error) { return nil, nil }
 

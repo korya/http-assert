@@ -41,7 +41,7 @@ const (
 // satisfy the assertion.
 type EvaluationError struct {
 	Code     EvaluationErrorCode
-	Kind     string
+	Kind     AssertionKind
 	Target   string
 	Encoding string
 	Cause    error
@@ -68,7 +68,7 @@ func (e *EvaluationError) Unwrap() error {
 // Outcome is the result of evaluating one assertion. Passed reports whether
 // both Failure and Err are nil.
 type Outcome struct {
-	Kind    string
+	Kind    AssertionKind
 	Failure *Failure
 	Err     error
 }
