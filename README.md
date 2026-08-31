@@ -91,7 +91,7 @@ amd64 and arm64 are attached to every [release](https://github.com/korya/http-as
 
 ```bash
 # Pick the latest tag from https://github.com/korya/http-assert/releases
-VERSION=v0.3.0
+VERSION=v0.4.0
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 ARCHIVE="http-assert_${VERSION#v}_${OS}_${ARCH}.tar.gz"
@@ -229,7 +229,9 @@ func CheckWithPolicy(ctx context.Context, url string) (*ha.Result, error) {
 }
 ```
 
-`Client.Do` consumes and closes the response body before returning. Use `Result.Response.BodyBytes` for the decoded payload rather than reading `Result.Response.Body`; HTTP status, headers and other `http.Response` metadata remain available. If content decoding fails, `DecodeErr` describes the problem and `BodyBytes` contains the encoded bytes as received.
+`Client.Do` consumes and closes the response body before returning. After a nil top-level error, use `Result.Response.BodyBytes` for the decoded payload rather than reading `Result.Response.Body`; HTTP status, headers and other `http.Response` metadata remain available. If reading the body fails, `BodyBytes` contains only the bytes received before the error and no decoding was attempted. If content decoding fails, `DecodeErr` describes the problem and `BodyBytes` contains the encoded bytes as received.
+
+Response bodies are currently buffered completely in memory without a configurable limit, including decoded payloads that may be larger than their wire representation. See [#106](https://github.com/korya/http-assert/issues/106).
 
 The library sends one request and never retries. Retry policy, destination validation, logging and presentation intentionally remain application concerns.
 

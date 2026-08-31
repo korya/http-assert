@@ -26,11 +26,20 @@ jobs:
     - name: Install just
       uses: extractions/setup-just@v4
 
+    - name: Install govulncheck
+      run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
     # A tag can be cut from any commit, not only one that master already proved
-    # green. Twenty seconds here is cheaper than a published binary that does
-    # not work and a version number that cannot be reused.
+    # green. Rechecking both the library and binary here is cheaper than a
+    # published artifact that does not work and a version that cannot be reused.
+    - name: Run unit tests with the race detector
+      run: just test-race
+
     - name: Run end-to-end tests
       run: just test-e2e
+
+    - name: Scan Go dependencies for known vulnerabilities
+      run: govulncheck ./...
 
     # The release body is the tag's section of CHANGELOG.md, nothing else. This
     # fails when that section is missing or empty, which stops the release

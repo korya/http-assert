@@ -41,6 +41,17 @@ func TestE2EAssertions(t *testing.T) {
 	}
 }
 
+// TestE2EAssertOKAcceptsRedirects keeps the intentional 2xx-or-3xx contract
+// aligned with the flag help and README. Issue #20 corrected the documentation;
+// this is ordinary regression coverage rather than a known defect.
+func TestE2EAssertOKAcceptsRedirects(t *testing.T) {
+	for _, path := range []string{"/redirect", "/redirect-rel"} {
+		t.Run(path, func(t *testing.T) {
+			assertExit(t, run(t, nil, "--assert-ok", url(path)), exitOK)
+		})
+	}
+}
+
 // TestE2EAssertionAggregation pins the behaviour that separates this tool from
 // `curl && grep`: every failing assertion is reported, not just the first.
 func TestE2EAssertionAggregation(t *testing.T) {
