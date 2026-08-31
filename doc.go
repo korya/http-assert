@@ -10,6 +10,8 @@
 // per assertion. Failures describe responses that did not satisfy an assertion;
 // evaluation errors describe assertions that could not reach a verdict.
 //
-// Client.Do consumes and closes the response body. The decoded payload remains
-// available as Result.Response.BodyBytes with the original HTTP metadata.
+// Client.Do consumes and closes the response body. After a nil top-level error,
+// the decoded payload remains available as Result.Response.BodyBytes with the
+// original HTTP metadata. A body-read error instead leaves the partial encoded
+// bytes in BodyBytes and returns a non-nil top-level error.
 package httpassert

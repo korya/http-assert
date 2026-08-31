@@ -18,13 +18,16 @@ import (
 )
 
 // Response is the response assertions inspect. Response.Body has already been
-// consumed and closed; BodyBytes contains the decoded payload when DecodeErr is
-// nil. The original headers, including Content-Encoding and Content-Length,
-// remain unchanged.
+// consumed and closed. After a successful Client.Do, BodyBytes contains the
+// decoded payload when DecodeErr is nil. If Client.Do returns a body-read
+// error, BodyBytes contains only the bytes read before that error and no
+// decoding was attempted. The original headers, including Content-Encoding and
+// Content-Length, remain unchanged.
 type Response struct {
 	*http.Response
-	// BodyBytes is the complete decoded response payload when DecodeErr is
-	// nil. Client.Do reads it before evaluating any assertion.
+	// BodyBytes is the complete decoded response payload after a successful
+	// Client.Do. On a body-read error it is the partial encoded payload received
+	// before the error; callers must check Client.Do's top-level error first.
 	BodyBytes []byte
 	// Encoding is the response's Content-Encoding value, with surrounding
 	// whitespace removed. An empty value means no encoding was declared.
