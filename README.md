@@ -138,13 +138,8 @@ import (
 )
 
 func Check(url string) (*ha.Result, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-
 	return (ha.Client{}).Do(
-		req,
+		ha.Must(http.NewRequest(http.MethodGet, url, nil)),
 		ha.AssertStatusOK(),
 		ha.AssertHeaderEqual("Content-Type", "application/json"),
 		ha.Must(ha.AssertJQ(`.status == "healthy"`)),
@@ -152,10 +147,10 @@ func Check(url string) (*ha.Result, error) {
 }
 ```
 
-Constructors that parse a status expression, regular expression or jq query
-return `(ha.Assertion, error)`. `ha.Must(...)` keeps static, programmer-owned
-expressions inline; it panics on invalid input, so runtime values should handle
-the constructor error normally.
+`ha.Must(...)` unwraps any `(T, error)` result, including requests and assertion
+constructors. It keeps static, programmer-owned values inline and panics on an
+error, so applications should handle errors from untrusted runtime input
+normally.
 
 `Client.Do` calls the configured HTTP client once and never retries. A returned
 error means no complete response was available, such as a transport or

@@ -42,16 +42,6 @@ type Assertion interface {
 	Check(res *Response) (*Failure, error)
 }
 
-// Must returns assertion when err is nil and panics otherwise. It makes
-// assertions built from static, programmer-controlled expressions convenient
-// to declare inline. Runtime input should handle the constructor error instead.
-func Must(assertion Assertion, err error) Assertion {
-	if err != nil {
-		panic(err)
-	}
-	return assertion
-}
-
 // FailureCode identifies why an assertion did not hold without prescribing how
 // a caller presents that fact.
 type FailureCode string

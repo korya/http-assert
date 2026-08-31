@@ -10,28 +10,6 @@ import (
 	"testing"
 )
 
-func TestMust(t *testing.T) {
-	t.Parallel()
-
-	t.Run("returns a successfully constructed assertion", func(t *testing.T) {
-		assertion := Must(AssertJQ(`.status == "healthy"`))
-		if assertion == nil || assertion.Kind() != "jq" {
-			t.Errorf("Must() = %v, want jq assertion", assertion)
-		}
-	})
-
-	t.Run("panics with the constructor error", func(t *testing.T) {
-		want := errors.New("invalid assertion")
-		defer func() {
-			if got := recover(); got != want {
-				t.Errorf("panic = %v, want %v", got, want)
-			}
-		}()
-
-		Must(nil, want)
-	})
-}
-
 func Test_AssertStatusOK(t *testing.T) {
 	t.Parallel()
 
