@@ -2,7 +2,7 @@ module github.com/korya/http-assert
 
 go 1.26
 
-toolchain go1.26.5
+toolchain go1.26.7
 
 require (
 	github.com/andybalholm/brotli v1.2.2

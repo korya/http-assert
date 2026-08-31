@@ -11,17 +11,6 @@ import "testing"
 //
 //	go test -run 'TestKnown' ./...
 
-// TestKnownIssue20AssertOkAcceptsRedirects: --assert-ok is documented as "2xx"
-// but implemented as 200-399.
-func TestKnownIssue20AssertOkAcceptsRedirects(t *testing.T) {
-	for _, path := range []string{"/redirect", "/redirect-rel"} {
-		t.Run(path, func(t *testing.T) {
-			characterizes(t, 20, "--assert-ok passes on a 3xx despite the docs saying 2xx")
-			assertExit(t, run(t, nil, "--assert-ok", url(path)), exitOK)
-		})
-	}
-}
-
 // TestKnownIssue23WildcardMaphostUnreachable: hostMapping.Matches handles "*"
 // and "*:*", but the parser rejects both, so the branches are dead code.
 func TestKnownIssue23WildcardMaphostUnreachable(t *testing.T) {

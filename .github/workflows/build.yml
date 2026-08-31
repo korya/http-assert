@@ -84,11 +84,17 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - name: Set up Go
+    - name: Set up Go from go.mod
+      if: matrix.go == ''
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+
+    - name: Set up stable Go
+      if: matrix.go != ''
       uses: actions/setup-go@v7
       with:
         go-version: ${{ matrix.go }}
-        go-version-file: go.mod
 
     - name: Install just
       uses: extractions/setup-just@v4

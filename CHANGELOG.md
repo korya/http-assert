@@ -9,6 +9,8 @@ are marked **Breaking** and listed first in their section.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-30
+
 ### Added
 
 - A reusable Go package at `github.com/korya/http-assert` exposes the HTTP
@@ -25,8 +27,10 @@ are marked **Breaking** and listed first in their section.
   `github.com/korya/http-assert/cmd/http-assert`; use
   `go install github.com/korya/http-assert/cmd/http-assert@latest`. Published
   release archives and the `http-assert` binary name are unchanged.
-- Assertion failures and evaluation errors are structured library data. The
-  CLI owns human-readable formatting and preserves its existing output.
+- Assertion failures and evaluation errors are structured library data. Each
+  outcome is exclusively a pass, a failed assertion or an evaluation error,
+  and its assertion family is consistently typed. The CLI owns human-readable
+  formatting and preserves its existing output.
 - Assertion families use the exported `AssertionKind` type and constants
   instead of requiring consumers to compare raw strings.
 - The library's zero-value client uses a 20-second total request timeout instead
@@ -160,7 +164,8 @@ Conventional Commits, and the transfer from `PlanitarInc`. See the
 [git history](https://github.com/korya/http-assert/commits/v0.0.7) for that
 period.
 
-[Unreleased]: https://github.com/korya/http-assert/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/korya/http-assert/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/korya/http-assert/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/korya/http-assert/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/korya/http-assert/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/korya/http-assert/compare/v0.0.7...v0.1.0
