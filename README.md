@@ -152,20 +152,90 @@ constructors. It keeps static, programmer-owned values inline and panics on an
 error, so applications should handle errors from untrusted runtime input
 normally.
 
-`Client.Do` calls the configured HTTP client once and never retries. A returned
-error means no complete response was available, such as a transport or
-body-read failure. With a nil error, `Result.Outcomes` contains one result per
-assertion, in call order; `Result.Passed()` is the convenient aggregate verdict.
-Failures expose a code, kind, target, expected value and actual value instead of
-preformatted text, so the calling application controls presentation. Evaluation
-errors such as invalid JSON remain distinct from responses that were evaluated
-and failed.
+### Inspect Results
+
+`Client.Do` returns a top-level error when it cannot produce complete assertion outcomes, such as an input-validation, transport or response-body read failure. A body-read failure may include a partial `Result`; check both return values before using it.
+
+With a nil error, `Result.Outcomes` contains one entry per assertion in call order. `Result.Passed()` provides the aggregate verdict. Each outcome distinguishes three states:
+
+| State | Meaning |
+|-------|---------|
+| `outcome.Passed()` | The assertion was evaluated and held. |
+| `outcome.Failure != nil` | The response was evaluated and did not satisfy the assertion. |
+| `outcome.Err != nil` | The assertion could not reach a verdict, for example because JSON decoding or jq evaluation failed. |
+
+Failures and evaluation errors are structured data rather than preformatted messages. Applications can switch on their typed codes and choose their own output:
+
+```go
+package healthcheck
+
+import (
+	"errors"
+	"fmt"
+
+	ha "github.com/korya/http-assert"
+)
+
+func Describe(outcome ha.Outcome) string {
+	switch {
+	case outcome.Err != nil:
+		var evaluation *ha.EvaluationError
+		if errors.As(outcome.Err, &evaluation) {
+			return fmt.Sprintf("%s could not be evaluated (%s): %v", outcome.Kind, evaluation.Code, evaluation)
+		}
+		return fmt.Sprintf("%s could not be evaluated: %v", outcome.Kind, outcome.Err)
+	case outcome.Failure != nil:
+		switch outcome.Failure.Code {
+		case ha.FailureStatusOK:
+			return fmt.Sprintf("expected 2xx-3xx, got %v", outcome.Failure.Actual)
+		default:
+			return fmt.Sprintf("%s failed (%s)", outcome.Kind, outcome.Failure.Code)
+		}
+	default:
+		return fmt.Sprintf("%s passed", outcome.Kind)
+	}
+}
+```
+
+`Outcome.Kind`, `Failure.Code` and `EvaluationError.Code` use exported types and constants, so consumers do not need to compare undocumented strings. `errors.As` exposes an `*ha.EvaluationError`; `errors.Is` continues through it to the underlying decoder, context or jq error.
+
+### Control HTTP Policy
 
 The zero-value client uses a shared HTTP client with a 20-second total timeout,
 covering connection setup, redirects and response-body reads. Supply
 `HTTPClient` to choose another timeout, transport, TLS or redirect policy; a
-request-context deadline can impose a shorter per-call bound. Retry policy,
-logging and CLI output intentionally remain outside the library API.
+request-context deadline can impose a shorter per-call bound. Request
+cancellation also stops jq evaluation.
+
+```go
+package healthcheck
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	ha "github.com/korya/http-assert"
+)
+
+func CheckWithPolicy(ctx context.Context, url string) (*ha.Result, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := ha.Client{HTTPClient: &http.Client{Timeout: 5 * time.Second}}
+	return client.Do(req, ha.AssertStatusOK())
+}
+```
+
+`Client.Do` consumes and closes the response body before returning. Use `Result.Response.BodyBytes` for the decoded payload rather than reading `Result.Response.Body`; HTTP status, headers and other `http.Response` metadata remain available. If content decoding fails, `DecodeErr` describes the problem and `BodyBytes` contains the encoded bytes as received.
+
+The library sends one request and never retries. Retry policy, destination validation, logging and presentation intentionally remain application concerns.
+
+### Compatibility
+
+This module follows semantic versioning, but while its major version is zero a minor release may contain a breaking API change. Pin the version selected in `go.mod`, review the changelog before upgrading, and expect the public contract to stabilize at v1.
 
 ## Usage
 
