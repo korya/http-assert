@@ -91,7 +91,7 @@ amd64 and arm64 are attached to every [release](https://github.com/korya/http-as
 
 ```bash
 # Pick the latest tag from https://github.com/korya/http-assert/releases
-VERSION=v0.4.0
+VERSION=v0.4.1
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 ARCHIVE="http-assert_${VERSION#v}_${OS}_${ARCH}.tar.gz"
@@ -798,7 +798,7 @@ becomes the body of its GitHub release, so a tag whose section is missing or
 empty fails the release before anything is published.
 
 ```bash
-just release-notes v0.4.0   # preview exactly what the release will say
+just release-notes v0.4.1   # preview exactly what the release will say
 just release-snapshot       # build every published target, publish nothing
 ```
 

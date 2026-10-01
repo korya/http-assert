@@ -9,6 +9,12 @@ are marked **Breaking** and listed first in their section.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-30
+
+### Changed
+
+- Update the Brotli and zstd dependencies to v1.2.5 and v1.20.1.
+
 ## [0.4.0] - 2026-08-30
 
 ### Added
@@ -164,7 +170,8 @@ Conventional Commits, and the transfer from `PlanitarInc`. See the
 [git history](https://github.com/korya/http-assert/commits/v0.0.7) for that
 period.
 
-[Unreleased]: https://github.com/korya/http-assert/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/korya/http-assert/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/korya/http-assert/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/korya/http-assert/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/korya/http-assert/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/korya/http-assert/compare/v0.1.0...v0.2.0
